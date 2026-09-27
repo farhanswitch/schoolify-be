@@ -3,11 +3,11 @@ package postgresql
 import (
 	"database/sql"
 	"net/http"
+	connections "schoolify_be/connections"
+	models "schoolify_be/models"
+	utility "schoolify_be/utilities"
+	errUtility "schoolify_be/utilities/errors"
 	"strings"
-	"template/connections"
-	"template/models"
-	utility "template/utilities"
-	errUtility "template/utilities/errors"
 )
 
 type AuthorPostgresRepo struct{}

@@ -5,9 +5,9 @@ import (
 	"log"
 	"net/http"
 
-	"template/configs"
-	"template/connections"
-	featAuthor "template/features/authors"
+	configs "schoolify_be/configs"
+	connections "schoolify_be/connections"
+	featAuthor "schoolify_be/features/authors"
 
 	chi "github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"

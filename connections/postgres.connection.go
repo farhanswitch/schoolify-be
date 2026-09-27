@@ -4,8 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-
-	"template/configs"
+	"schoolify_be/configs"
 
 	_ "github.com/lib/pq"
 )

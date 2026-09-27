@@ -1,7 +1,7 @@
 package authors
 
 import (
-	repoPostgres "template/repositories/postgresql"
+	repoPostgres "schoolify_be/repositories/postgresql"
 
 	"github.com/go-chi/chi/v5"
 )

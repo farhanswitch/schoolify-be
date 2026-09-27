@@ -2,11 +2,11 @@ package authors
 
 import (
 	"net/http"
+	models "schoolify_be/models"
+	repoPostgres "schoolify_be/repositories/postgresql"
+	utilities "schoolify_be/utilities"
+	errUtility "schoolify_be/utilities/errors"
 	"sync"
-	"template/models"
-	repoPostgres "template/repositories/postgresql"
-	"template/utilities"
-	errUtility "template/utilities/errors"
 )
 
 type authorService struct {

@@ -4,8 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-
-	"template/configs"
+	"schoolify_be/configs"
 
 	"github.com/redis/go-redis/v9"
 )
