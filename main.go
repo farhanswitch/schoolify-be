@@ -40,7 +40,6 @@ func main() {
 
 func initModules() {
 	configs.InitModule(".env")
-	// connections.DbMySQL()
 	connections.DbPostgres()
 	// connections.ConnectRedis()
 }

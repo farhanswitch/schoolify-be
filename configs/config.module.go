@@ -43,17 +43,7 @@ var appConf appConfig
 
 func GetConfig() appConfig {
 	if appConf == (appConfig{}) {
-		dbPortMySQL, err := strconv.Atoi(os.Getenv("DB_PORT"))
-		if err != nil {
-			log.Fatalf("Invalid Database Port. Error: %s\n", err.Error())
-		}
-		var dbConfMySQL dbConfig = dbConfig{
-			Host:     os.Getenv("DB_HOST"),
-			Port:     uint16(dbPortMySQL),
-			User:     os.Getenv("DB_USER"),
-			Pass:     os.Getenv("DB_PASS"),
-			Database: os.Getenv("DB_NAME"),
-		}
+
 		dbPortPostgres, err := strconv.Atoi(os.Getenv("DB_PORT2"))
 		if err != nil {
 			log.Fatalf("Invalid Database Port 2. Error: %s\n", err.Error())
@@ -83,7 +73,6 @@ func GetConfig() appConfig {
 		}
 
 		appConf = appConfig{
-			DbMySql:    dbConfMySQL,
 			DbPostgres: dbConfPostgres,
 			Redis:      redisConf,
 			Service:    serviceConf,
