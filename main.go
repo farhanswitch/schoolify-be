@@ -8,6 +8,7 @@ import (
 	configs "schoolify_be/configs"
 	connections "schoolify_be/connections"
 	featAuthor "schoolify_be/features/authors"
+	featUser "schoolify_be/features/users"
 
 	chi "github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -39,12 +40,13 @@ func main() {
 
 func initModules() {
 	configs.InitModule(".env")
-	connections.DbMySQL()
+	// connections.DbMySQL()
 	connections.DbPostgres()
-	connections.ConnectRedis()
+	// connections.ConnectRedis()
 }
 func internalModules(router *chi.Mux) {
 	featAuthor.InitModule(router)
+	featUser.InitModule(router)
 	// users.InitModule(router)
 	// files.InitModule(router)
 	// markets.InitModule(router)
