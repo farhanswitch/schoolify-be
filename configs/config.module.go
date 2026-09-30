@@ -21,8 +21,9 @@ type redisConfig struct {
 	Port uint16
 }
 type serviceConfig struct {
-	Port uint16
-	Host string
+	Port       uint16
+	Host       string
+	EncryptKey string
 }
 
 type appConfig struct {
@@ -68,8 +69,9 @@ func GetConfig() appConfig {
 			log.Fatalf("Invalid Application Port. Error: %s\n", err.Error())
 		}
 		var serviceConf serviceConfig = serviceConfig{
-			Host: os.Getenv("APP_HOST"),
-			Port: uint16(appPort),
+			Host:       os.Getenv("APP_HOST"),
+			Port:       uint16(appPort),
+			EncryptKey: os.Getenv("ENCRYPT_KEY"),
 		}
 
 		appConf = appConfig{

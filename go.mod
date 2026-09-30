@@ -1,6 +1,6 @@
 module schoolify_be
 
-go 1.24.1
+go 1.26.0
 
 require (
 	github.com/go-chi/chi/v5 v5.2.3
@@ -21,7 +21,8 @@ require (
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
-	golang.org/x/crypto v0.42.0 // indirect
-	golang.org/x/sys v0.36.0 // indirect
-	golang.org/x/text v0.29.0 // indirect
+	golang.org/x/crypto v0.57.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
+	gopkg.in/square/go-jose.v2 v2.6.0 // indirect
 )
