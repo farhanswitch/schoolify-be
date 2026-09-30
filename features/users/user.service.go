@@ -2,7 +2,6 @@ package users
 
 import (
 	models "schoolify_be/models"
-	repoPostgres "schoolify_be/repositories/postgresql"
 	utilities "schoolify_be/utilities"
 	custom_errors "schoolify_be/utilities/errors"
 	errUtility "schoolify_be/utilities/errors"
@@ -11,8 +10,13 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+type userPostgresRepoInterface interface {
+	GetUserByUsername(param models.UserLoginRequest) (models.User, errUtility.CustomError)
+	RegisterUser(user models.UserRegisterRequest) (bool, errUtility.CustomError)
+}
+
 type userService struct {
-	repo repoPostgres.UserPostgresRepo
+	repo userPostgresRepoInterface
 }
 
 var service userService
@@ -67,8 +71,8 @@ func (s userService) RegisterUserSrvc(param models.UserRegisterRequest) (bool, e
 	return s.repo.RegisterUser(param)
 
 }
-func factoryUserService(repo repoPostgres.UserPostgresRepo) userService {
-	if service == (userService{}) {
+func factoryUserService(repo userPostgresRepoInterface) userService {
+	if service.repo == nil {
 		service = userService{repo: repo}
 	}
 	return service

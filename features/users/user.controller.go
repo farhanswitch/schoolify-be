@@ -14,8 +14,13 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
+type userServiceInterface interface {
+	GetUserDataByUsernameSrvc(param models.UserLoginRequest) (models.User, errUtility.CustomError)
+	RegisterUserSrvc(param models.UserRegisterRequest) (bool, errUtility.CustomError)
+}
+
 type userController struct {
-	service userService
+	service userServiceInterface
 }
 
 var controller userController
@@ -118,7 +123,7 @@ func (a userController) UserLoginCtrl(w http.ResponseWriter, r *http.Request) {
 }
 
 func factoryUserController(repo repoPostgres.UserPostgresRepo) userController {
-	if controller == (userController{}) {
+	if controller.service == nil {
 		controller = userController{
 			service: factoryUserService(repo),
 		}
