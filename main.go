@@ -41,7 +41,7 @@ func main() {
 func initModules() {
 	configs.InitModule(".env")
 	connections.DbPostgres()
-	// connections.ConnectRedis()
+	connections.ConnectRedis()
 }
 func internalModules(router *chi.Mux) {
 	featAuthor.InitModule(router)

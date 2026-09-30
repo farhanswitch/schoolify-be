@@ -32,6 +32,14 @@ type UserRegisterRequest struct {
 }
 
 type UserLoginRequest struct {
-	Username string `json:"username" validate:"required"`
-	Password string `json:"password" validate:"required"`
+	Username string `json:"username" validate:"required,min=6,max=15,alphanum"`
+	Password string `json:"password" validate:"required,min=3,max=30"`
+}
+
+type UserLoginData struct {
+	ID       uuid.UUID `json:"id"`
+	Username string    `json:"username"`
+	Password string    `json:"password"`
+	RoleID   uuid.UUID `json:"roleID"`
+	RoleName string    `json:"roleName"`
 }

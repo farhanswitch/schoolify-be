@@ -1,18 +1,23 @@
 package users
 
 import (
+	"fmt"
+	"schoolify_be/configs"
 	models "schoolify_be/models"
 	utilities "schoolify_be/utilities"
 	custom_errors "schoolify_be/utilities/errors"
 	errUtility "schoolify_be/utilities/errors"
+	"time"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
+	"gopkg.in/square/go-jose.v2/jwt"
 )
 
 type userPostgresRepoInterface interface {
 	GetUserByUsername(param models.UserLoginRequest) (models.User, errUtility.CustomError)
 	RegisterUser(user models.UserRegisterRequest) (bool, errUtility.CustomError)
+	UserLogin(user models.UserLoginRequest) (models.UserLoginData, errUtility.CustomError)
 }
 
 type userService struct {
@@ -69,6 +74,65 @@ func (s userService) RegisterUserSrvc(param models.UserRegisterRequest) (bool, e
 	}
 	param.Password = string(hashedPassword)
 	return s.repo.RegisterUser(param)
+
+}
+
+func (s userService) UserLogin(param models.UserLoginRequest) (map[string]any, errUtility.CustomError) {
+	loginData, errObj := s.repo.UserLogin(param)
+	if errObj.Code > 0 {
+		return map[string]any{}, errObj
+	}
+	err := bcrypt.CompareHashAndPassword([]byte(loginData.Password), []byte(param.Password))
+	if err != nil {
+		utilities.Log(utilities.ERROR, "/api/auth/login", "UserLoginSrvc", param, "Error bcrypt compare: "+err.Error(), err)
+		return map[string]any{}, custom_errors.CustomError{
+			Code:          500,
+			Message:       err.Error(),
+			MessageToSend: "Invalid username or password",
+		}
+	}
+	claims := map[string]any{
+		"username": loginData.Username,
+		"id":       loginData.ID,
+		"roleID":   loginData.RoleID,
+		"roleName": loginData.RoleName,
+		"Issuer":   "Schoolify",
+		"Expiry":   jwt.NewNumericDate(time.Now().Add(time.Duration(configs.GetConfig().Service.SessionTime) * time.Second)),
+		"IssuedAt": jwt.NewNumericDate(time.Now()),
+	}
+	strToken, err := utilities.JWEEncryptAES(claims, []byte(configs.GetConfig().Service.EncryptKey))
+	if err != nil {
+		return map[string]any{}, custom_errors.CustomError{
+			Code:          500,
+			Message:       err.Error(),
+			MessageToSend: "Invalid username or password",
+		}
+	}
+	err = utilities.RedisInstance().DeleteValue(fmt.Sprintf("TOKEN_%s_1", loginData.Username))
+	if err != nil {
+		return map[string]any{}, custom_errors.CustomError{
+			Code:          500,
+			Message:       err.Error(),
+			MessageToSend: "Invalid username or password"}
+	}
+
+	err = utilities.RedisInstance().DeleteValue(fmt.Sprintf("TOKEN_%s_2", loginData.Username))
+	if err != nil {
+		return map[string]any{}, custom_errors.CustomError{
+			Code:          500,
+			Message:       err.Error(),
+			MessageToSend: "Invalid username or password"}
+	}
+	err = utilities.RedisInstance().SaveValue(fmt.Sprintf("TOKEN_%s_1", loginData.Username), strToken, time.Duration(configs.GetConfig().Service.SessionTime)*time.Second)
+	if err != nil {
+		return map[string]any{}, custom_errors.CustomError{
+			Code:          500,
+			Message:       err.Error(),
+			MessageToSend: "Invalid username or password"}
+	}
+	claims["token"] = strToken
+
+	return claims, errObj
 
 }
 func factoryUserService(repo userPostgresRepoInterface) userService {

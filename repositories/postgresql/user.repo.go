@@ -87,6 +87,34 @@ func (UserPostgresRepo) RegisterUser(user models.UserRegisterRequest) (bool, err
 	}
 	return false, errUtility.CustomError{}
 }
+func (UserPostgresRepo) UserLogin(user models.UserLoginRequest) (models.UserLoginData, errUtility.CustomError) {
+	result, err := connections.DbPostgres().Query("SELECT u.id, u.username, u.password, r.id AS roleID, r.name AS roleName FROM users AS u JOIN roles AS r ON u.role_id = r.id WHERE u.username = $1 LIMIT 1;", user.Username)
+	if err != nil {
+		return models.UserLoginData{}, errUtility.CustomError{
+			Code:          http.StatusBadRequest,
+			Message:       err.Error(),
+			MessageToSend: "Invalid username or password",
+		}
+	}
+
+	if result.Next() {
+		var data models.UserLoginData
+		err := result.Scan(&data.ID, &data.Username, &data.Password, &data.RoleID, &data.RoleName)
+		if err != nil {
+			return models.UserLoginData{}, errUtility.CustomError{
+				Code:          http.StatusBadRequest,
+				Message:       err.Error(),
+				MessageToSend: "Invalid username or password",
+			}
+		}
+		return data, errUtility.CustomError{}
+	}
+	return models.UserLoginData{}, errUtility.CustomError{
+		Code:          http.StatusBadRequest,
+		Message:       err.Error(),
+		MessageToSend: "Invalid username or password",
+	}
+}
 func FactoryUserRepo() UserPostgresRepo {
 	if userRepo == (UserPostgresRepo{}) {
 		userRepo = UserPostgresRepo{}

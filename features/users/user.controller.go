@@ -17,6 +17,7 @@ import (
 type userServiceInterface interface {
 	GetUserDataByUsernameSrvc(param models.UserLoginRequest) (models.User, errUtility.CustomError)
 	RegisterUserSrvc(param models.UserRegisterRequest) (bool, errUtility.CustomError)
+	UserLogin(param models.UserLoginRequest) (map[string]any, errUtility.CustomError)
 }
 
 type userController struct {
@@ -98,7 +99,7 @@ func (a userController) UserLoginCtrl(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `{"errors":%s}`, strError)
 		return
 	}
-	userData, errObj := a.service.GetUserDataByUsernameSrvc(param)
+	userData, errObj := a.service.UserLogin(param)
 	if errObj.Code > 200 {
 		errObj.Compile()
 		// Error log for service error
