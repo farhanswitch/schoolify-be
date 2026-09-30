@@ -77,6 +77,8 @@ func parseFieldError(err validator.FieldError, errorData map[string][]string) {
 		errorMessage = fmt.Sprintf("Value for field %s must be an alphanumeric string.", err.Field())
 	case "hashid":
 		errorMessage = "Invalid id"
+	case "password":
+		errorMessage = "Password must contains letters, number, and special characters"
 	default:
 		errorMessage = fmt.Errorf("%v", err).Error()
 	}

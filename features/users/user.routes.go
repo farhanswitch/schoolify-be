@@ -11,4 +11,5 @@ func InitModule(router *chi.Mux) {
 	controller := factoryUserController(repo)
 
 	router.Post("/api/auth/login", controller.UserLoginCtrl)
+	router.Post("/api/auth/register", controller.RegisterUserCtrl)
 }

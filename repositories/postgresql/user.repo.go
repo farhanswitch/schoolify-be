@@ -17,7 +17,7 @@ var userRepo UserPostgresRepo
 func (UserPostgresRepo) GetUserByUsername(param models.UserLoginRequest) (models.User, errUtility.CustomError) {
 	var user models.User
 	var nullableUpdatedAt sql.NullTime
-	err := connections.DbPostgres().QueryRow("SELECT id, role_id, username, email, first_name, last_name, password, status, created, updated FROM public.users WHERE username=$1;", param.Username).Scan(&user.ID, &user.RoleID, &user.Username, &user.Email, &user.FirstName, &user.LastName, &user.Password, &user.Status, &nullableUpdatedAt)
+	err := connections.DbPostgres().QueryRow("SELECT id, role_id, username, email, first_name, last_name, password, status, created, updated FROM public.users WHERE username=$1;", param.Username).Scan(&user.ID, &user.RoleID, &user.Username, &user.Email, &user.FirstName, &user.LastName, &user.Password, &user.Status, &user.Created, &nullableUpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return models.User{}, errUtility.CustomError{
@@ -51,7 +51,42 @@ func (UserPostgresRepo) GetUserByUsername(param models.UserLoginRequest) (models
 	}
 	return user, errUtility.CustomError{}
 }
+func (UserPostgresRepo) RegisterUser(user models.UserRegisterRequest) (bool, errUtility.CustomError) {
+	_, err := connections.DbPostgres().Exec("INSERT INTO users(id, role_id, username, email, first_name, last_name, password) VALUES($1, $2, $3, $4, $5, $6, $7)", user.ID, user.RoleID, user.Username, user.Email, user.FirstName, user.LastName, user.Password)
+	if err != nil {
+		var customErr errUtility.CustomError
 
+		if strings.Contains(err.Error(), "unique") {
+			if strings.Contains(err.Error(), "username") {
+				customErr = errUtility.CustomError{
+					Code:          http.StatusUnprocessableEntity,
+					Message:       err.Error(),
+					MessageToSend: "The username has already been taken.",
+				}
+			} else if strings.Contains(err.Error(), "email") {
+				customErr = errUtility.CustomError{
+					Code:          http.StatusUnprocessableEntity,
+					Message:       err.Error(),
+					MessageToSend: "This email address is already registered. Please log in.",
+				}
+			} else {
+				customErr = errUtility.CustomError{
+					Code:          http.StatusInternalServerError,
+					Message:       err.Error(),
+					MessageToSend: "Duplicate data.",
+				}
+			}
+		} else {
+			customErr = errUtility.CustomError{
+				Code:          http.StatusInternalServerError,
+				Message:       err.Error(),
+				MessageToSend: "Internal server error.",
+			}
+		}
+		return true, customErr
+	}
+	return false, errUtility.CustomError{}
+}
 func FactoryUserRepo() UserPostgresRepo {
 	if userRepo == (UserPostgresRepo{}) {
 		userRepo = UserPostgresRepo{}
