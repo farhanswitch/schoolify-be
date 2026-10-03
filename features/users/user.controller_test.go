@@ -16,6 +16,7 @@ import (
 type mockUserService struct {
 	GetUserDataByUsernameSrvcFunc func(param models.UserLoginRequest) (models.User, errUtility.CustomError)
 	RegisterUserSrvcFunc          func(param models.UserRegisterRequest) (bool, errUtility.CustomError)
+	UserLoginFunc                 func(param models.UserLoginRequest) (map[string]any, errUtility.CustomError)
 }
 
 func (m *mockUserService) GetUserDataByUsernameSrvc(param models.UserLoginRequest) (models.User, errUtility.CustomError) {
@@ -30,6 +31,13 @@ func (m *mockUserService) RegisterUserSrvc(param models.UserRegisterRequest) (bo
 		return m.RegisterUserSrvcFunc(param)
 	}
 	return false, errUtility.CustomError{}
+}
+
+func (m *mockUserService) UserLogin(param models.UserLoginRequest) (map[string]any, errUtility.CustomError) {
+	if m.UserLoginFunc != nil {
+		return m.UserLoginFunc(param)
+	}
+	return map[string]any{}, errUtility.CustomError{}
 }
 
 func TestPasswordValidation(t *testing.T) {
@@ -380,6 +388,221 @@ func TestRegisterUserCtrl(t *testing.T) {
 		}
 		if !strings.Contains(w.Body.String(), `"message":"User created successfully"`) {
 			t.Errorf("expected 'User created successfully', got %s", w.Body.String())
+		}
+	})
+}
+
+func TestUserLoginCtrl(t *testing.T) {
+	defaultPayload := map[string]string{
+		"username": "johndoe",
+		"password": "Password123!",
+	}
+
+	buildJSONBody := func(payload map[string]string) *bytes.Buffer {
+		data, _ := json.Marshal(payload)
+		return bytes.NewBuffer(data)
+	}
+
+	t.Run("should return 400 Bad Request when JSON is malformed", func(t *testing.T) {
+		serviceMock := &mockUserService{}
+		ctrl := userController{service: serviceMock}
+
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader("{invalid-json"))
+		w := httptest.NewRecorder()
+
+		ctrl.UserLoginCtrl(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+		}
+		if !strings.Contains(w.Body.String(), `"message":"Invalid Data"`) {
+			t.Errorf("expected response to contain 'Invalid Data', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 400 Bad Request when required fields are missing", func(t *testing.T) {
+		serviceMock := &mockUserService{}
+		ctrl := userController{service: serviceMock}
+
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader("{}"))
+		w := httptest.NewRecorder()
+
+		ctrl.UserLoginCtrl(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+		}
+
+		var resp map[string]any
+		err := json.Unmarshal(w.Body.Bytes(), &resp)
+		if err != nil {
+			t.Fatalf("failed to parse response JSON: %v", err)
+		}
+
+		errorsMap, ok := resp["errors"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected response to contain 'errors' map, got %v", resp)
+		}
+
+		requiredFields := []string{"Username", "Password"}
+		for _, field := range requiredFields {
+			if _, exists := errorsMap[field]; !exists {
+				t.Errorf("expected validation error for field %q", field)
+			}
+		}
+	})
+
+	t.Run("should return 400 Bad Request on invalid username (min length, max length, alphanum)", func(t *testing.T) {
+		invalidUsernames := []struct {
+			name     string
+			username string
+		}{
+			{name: "too short (< 6 chars)", username: "usr"},
+			{name: "too long (> 15 chars)", username: "user_is_way_too_long"},
+			{name: "non-alphanumeric", username: "user!name"},
+		}
+
+		for _, item := range invalidUsernames {
+			t.Run(item.name, func(t *testing.T) {
+				serviceMock := &mockUserService{}
+				ctrl := userController{service: serviceMock}
+
+				payload := map[string]string{
+					"username": item.username,
+					"password": "Password123!",
+				}
+
+				req := httptest.NewRequest(http.MethodPost, "/api/auth/login", buildJSONBody(payload))
+				w := httptest.NewRecorder()
+
+				ctrl.UserLoginCtrl(w, req)
+
+				if w.Code != http.StatusBadRequest {
+					t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+				}
+				if !strings.Contains(w.Body.String(), `"Username"`) {
+					t.Errorf("expected error for username field, got: %s", w.Body.String())
+				}
+			})
+		}
+	})
+
+	t.Run("should return 400 Bad Request on invalid password (min < 3, max > 30)", func(t *testing.T) {
+		invalidPasswords := []struct {
+			name     string
+			password string
+		}{
+			{name: "too short (< 3 chars)", password: "ab"},
+			{name: "too long (> 30 chars)", password: strings.Repeat("A", 31)},
+		}
+
+		for _, item := range invalidPasswords {
+			t.Run(item.name, func(t *testing.T) {
+				serviceMock := &mockUserService{}
+				ctrl := userController{service: serviceMock}
+
+				payload := map[string]string{
+					"username": "johndoe",
+					"password": item.password,
+				}
+
+				req := httptest.NewRequest(http.MethodPost, "/api/auth/login", buildJSONBody(payload))
+				w := httptest.NewRecorder()
+
+				ctrl.UserLoginCtrl(w, req)
+
+				if w.Code != http.StatusBadRequest {
+					t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+				}
+				if !strings.Contains(w.Body.String(), `"Password"`) {
+					t.Errorf("expected error for password field, got: %s", w.Body.String())
+				}
+			})
+		}
+	})
+
+	t.Run("should return proper error status when service returns error", func(t *testing.T) {
+		serviceErrors := []struct {
+			name           string
+			code           uint
+			messageToSend  string
+			expectedStatus int
+		}{
+			{
+				name:           "invalid credentials 400",
+				code:           http.StatusBadRequest,
+				messageToSend:  "Invalid username or password",
+				expectedStatus: http.StatusBadRequest,
+			},
+			{
+				name:           "internal server error 500",
+				code:           http.StatusInternalServerError,
+				messageToSend:  "Internal Server Error",
+				expectedStatus: http.StatusInternalServerError,
+			},
+		}
+
+		for _, item := range serviceErrors {
+			t.Run(item.name, func(t *testing.T) {
+				serviceMock := &mockUserService{
+					UserLoginFunc: func(param models.UserLoginRequest) (map[string]any, errUtility.CustomError) {
+						return map[string]any{}, errUtility.CustomError{
+							Code:          item.code,
+							Message:       "error",
+							MessageToSend: item.messageToSend,
+						}
+					},
+				}
+				ctrl := userController{service: serviceMock}
+
+				req := httptest.NewRequest(http.MethodPost, "/api/auth/login", buildJSONBody(defaultPayload))
+				w := httptest.NewRecorder()
+
+				ctrl.UserLoginCtrl(w, req)
+
+				if w.Code != item.expectedStatus {
+					t.Errorf("expected status %d, got %d", item.expectedStatus, w.Code)
+				}
+				if !strings.Contains(w.Body.String(), item.messageToSend) {
+					t.Errorf("expected body to contain %q, got %s", item.messageToSend, w.Body.String())
+				}
+			})
+		}
+	})
+
+	t.Run("should return 200 OK with token data when login succeeds", func(t *testing.T) {
+		serviceCalled := false
+		expectedData := map[string]any{
+			"username": "johndoe",
+			"token":    "sample.jwt.token",
+		}
+		serviceMock := &mockUserService{
+			UserLoginFunc: func(param models.UserLoginRequest) (map[string]any, errUtility.CustomError) {
+				serviceCalled = true
+				if param.Username != defaultPayload["username"] {
+					t.Errorf("expected username %s, got %s", defaultPayload["username"], param.Username)
+				}
+				return expectedData, errUtility.CustomError{}
+			},
+		}
+		ctrl := userController{service: serviceMock}
+
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", buildJSONBody(defaultPayload))
+		w := httptest.NewRecorder()
+
+		ctrl.UserLoginCtrl(w, req)
+
+		if !serviceCalled {
+			t.Errorf("expected service to be called on valid login")
+		}
+		if w.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+		}
+		if !strings.Contains(w.Body.String(), `"message":"Success login"`) {
+			t.Errorf("expected 'Success login', got %s", w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), `"token":"sample.jwt.token"`) {
+			t.Errorf("expected response to contain token, got %s", w.Body.String())
 		}
 	})
 }

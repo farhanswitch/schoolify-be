@@ -1,19 +1,32 @@
 package users
 
 import (
+	"errors"
 	"net/http"
+	"os"
 	models "schoolify_be/models"
 	errUtility "schoolify_be/utilities/errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
+func init() {
+	os.Setenv("DB_PORT2", "5432")
+	os.Setenv("REDIS_PORT", "6379")
+	os.Setenv("APP_PORT", "8080")
+	os.Setenv("SESSION_TIME", "3600")
+	os.Setenv("REFRESH_TIME", "7200")
+	os.Setenv("ENCRYPT_KEY", "12345678901234567890123456789012") // 32 bytes required for AES-256
+}
+
 type mockUserRepo struct {
 	GetUserByUsernameFunc func(param models.UserLoginRequest) (models.User, errUtility.CustomError)
 	RegisterUserFunc      func(user models.UserRegisterRequest) (bool, errUtility.CustomError)
+	UserLoginFunc         func(user models.UserLoginRequest) (models.UserLoginData, errUtility.CustomError)
 }
 
 func (m *mockUserRepo) GetUserByUsername(param models.UserLoginRequest) (models.User, errUtility.CustomError) {
@@ -28,6 +41,40 @@ func (m *mockUserRepo) RegisterUser(user models.UserRegisterRequest) (bool, errU
 		return m.RegisterUserFunc(user)
 	}
 	return false, errUtility.CustomError{}
+}
+
+func (m *mockUserRepo) UserLogin(user models.UserLoginRequest) (models.UserLoginData, errUtility.CustomError) {
+	if m.UserLoginFunc != nil {
+		return m.UserLoginFunc(user)
+	}
+	return models.UserLoginData{}, errUtility.CustomError{}
+}
+
+type mockRedisUtility struct {
+	SaveValueFunc   func(key string, value interface{}, ttl time.Duration) error
+	DeleteValueFunc func(key string) error
+	GetValueFunc    func(key string) (string, error)
+}
+
+func (m *mockRedisUtility) SaveValue(key string, value interface{}, ttl time.Duration) error {
+	if m.SaveValueFunc != nil {
+		return m.SaveValueFunc(key, value, ttl)
+	}
+	return nil
+}
+
+func (m *mockRedisUtility) DeleteValue(key string) error {
+	if m.DeleteValueFunc != nil {
+		return m.DeleteValueFunc(key)
+	}
+	return nil
+}
+
+func (m *mockRedisUtility) GetValue(key string) (string, error) {
+	if m.GetValueFunc != nil {
+		return m.GetValueFunc(key)
+	}
+	return "", nil
 }
 
 func TestRegisterUserSrvc(t *testing.T) {
@@ -228,3 +275,205 @@ func TestRegisterUserSrvc(t *testing.T) {
 		}
 	})
 }
+
+func TestUserLoginSrvc(t *testing.T) {
+	rawPassword := "Password123!"
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(rawPassword), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("failed to hash password for test: %v", err)
+	}
+
+	mockID := uuid.New()
+	mockRoleID := uuid.New()
+
+	validLoginData := models.UserLoginData{
+		ID:       mockID,
+		Username: "johndoe",
+		Password: string(hashedPassword),
+		RoleID:   mockRoleID,
+		RoleName: "Student",
+	}
+
+	validRequest := models.UserLoginRequest{
+		Username: "johndoe",
+		Password: rawPassword,
+	}
+
+	t.Run("should succeed and return token claims when credentials and redis are valid", func(t *testing.T) {
+		repoMock := &mockUserRepo{
+			UserLoginFunc: func(user models.UserLoginRequest) (models.UserLoginData, errUtility.CustomError) {
+				return validLoginData, errUtility.CustomError{}
+			},
+		}
+
+		deletedKeys := []string{}
+		savedKeys := make(map[string]any)
+
+		redisMock := &mockRedisUtility{
+			DeleteValueFunc: func(key string) error {
+				deletedKeys = append(deletedKeys, key)
+				return nil
+			},
+			SaveValueFunc: func(key string, value interface{}, ttl time.Duration) error {
+				savedKeys[key] = value
+				return nil
+			},
+		}
+
+		service := userService{repo: repoMock, redis: redisMock}
+		claims, errObj := service.UserLogin(validRequest)
+
+		if errObj.Code > 0 {
+			t.Fatalf("expected errObj.Code to be 0, got %d with message: %s", errObj.Code, errObj.Message)
+		}
+		if claims["username"] != "johndoe" {
+			t.Errorf("expected username 'johndoe', got %v", claims["username"])
+		}
+		if claims["roleName"] != "Student" {
+			t.Errorf("expected roleName 'Student', got %v", claims["roleName"])
+		}
+		if claims["token"] == nil || claims["token"] == "" {
+			t.Errorf("expected token in claims, got nil/empty")
+		}
+
+		// Verify redis deletions and save
+		if len(deletedKeys) != 2 {
+			t.Errorf("expected 2 keys deleted from redis, got %d", len(deletedKeys))
+		}
+		if _, ok := savedKeys["TOKEN_johndoe_1"]; !ok {
+			t.Errorf("expected TOKEN_johndoe_1 to be saved in redis")
+		}
+	})
+
+	t.Run("should return error when repo UserLogin fails (user not found)", func(t *testing.T) {
+		repoMock := &mockUserRepo{
+			UserLoginFunc: func(user models.UserLoginRequest) (models.UserLoginData, errUtility.CustomError) {
+				return models.UserLoginData{}, errUtility.CustomError{
+					Code:          http.StatusBadRequest,
+					Message:       "User not found",
+					MessageToSend: "Invalid username or password",
+				}
+			},
+		}
+		redisMock := &mockRedisUtility{}
+
+		service := userService{repo: repoMock, redis: redisMock}
+		claims, errObj := service.UserLogin(validRequest)
+
+		if errObj.Code != http.StatusBadRequest {
+			t.Errorf("expected code 400, got %d", errObj.Code)
+		}
+		if errObj.MessageToSend != "Invalid username or password" {
+			t.Errorf("expected 'Invalid username or password', got '%s'", errObj.MessageToSend)
+		}
+		if len(claims) != 0 {
+			t.Errorf("expected empty claims on failure, got %v", claims)
+		}
+	})
+
+	t.Run("should return error when password does not match", func(t *testing.T) {
+		repoMock := &mockUserRepo{
+			UserLoginFunc: func(user models.UserLoginRequest) (models.UserLoginData, errUtility.CustomError) {
+				return validLoginData, errUtility.CustomError{}
+			},
+		}
+		redisMock := &mockRedisUtility{}
+
+		wrongPassRequest := models.UserLoginRequest{
+			Username: "johndoe",
+			Password: "WrongPassword!",
+		}
+
+		service := userService{repo: repoMock, redis: redisMock}
+		claims, errObj := service.UserLogin(wrongPassRequest)
+
+		if errObj.Code != 500 {
+			t.Errorf("expected error code 500 on password mismatch, got %d", errObj.Code)
+		}
+		if errObj.MessageToSend != "Invalid username or password" {
+			t.Errorf("expected 'Invalid username or password', got '%s'", errObj.MessageToSend)
+		}
+		if len(claims) != 0 {
+			t.Errorf("expected empty claims on failure, got %v", claims)
+		}
+	})
+
+	t.Run("should return error when redis DeleteValue slot 1 fails", func(t *testing.T) {
+		repoMock := &mockUserRepo{
+			UserLoginFunc: func(user models.UserLoginRequest) (models.UserLoginData, errUtility.CustomError) {
+				return validLoginData, errUtility.CustomError{}
+			},
+		}
+		redisMock := &mockRedisUtility{
+			DeleteValueFunc: func(key string) error {
+				if key == "TOKEN_johndoe_1" {
+					return errors.New("redis connection timeout")
+				}
+				return nil
+			},
+		}
+
+		service := userService{repo: repoMock, redis: redisMock}
+		_, errObj := service.UserLogin(validRequest)
+
+		if errObj.Code != 500 {
+			t.Errorf("expected code 500 on redis delete error, got %d", errObj.Code)
+		}
+		if errObj.MessageToSend != "Invalid username or password" {
+			t.Errorf("expected 'Invalid username or password', got '%s'", errObj.MessageToSend)
+		}
+	})
+
+	t.Run("should return error when redis DeleteValue slot 2 fails", func(t *testing.T) {
+		repoMock := &mockUserRepo{
+			UserLoginFunc: func(user models.UserLoginRequest) (models.UserLoginData, errUtility.CustomError) {
+				return validLoginData, errUtility.CustomError{}
+			},
+		}
+		redisMock := &mockRedisUtility{
+			DeleteValueFunc: func(key string) error {
+				if key == "TOKEN_johndoe_2" {
+					return errors.New("redis error slot 2")
+				}
+				return nil
+			},
+		}
+
+		service := userService{repo: repoMock, redis: redisMock}
+		_, errObj := service.UserLogin(validRequest)
+
+		if errObj.Code != 500 {
+			t.Errorf("expected code 500 on redis delete error, got %d", errObj.Code)
+		}
+		if errObj.MessageToSend != "Invalid username or password" {
+			t.Errorf("expected 'Invalid username or password', got '%s'", errObj.MessageToSend)
+		}
+	})
+
+	t.Run("should return error when redis SaveValue fails", func(t *testing.T) {
+		repoMock := &mockUserRepo{
+			UserLoginFunc: func(user models.UserLoginRequest) (models.UserLoginData, errUtility.CustomError) {
+				return validLoginData, errUtility.CustomError{}
+			},
+		}
+		redisMock := &mockRedisUtility{
+			DeleteValueFunc: func(key string) error {
+				return nil
+			},
+			SaveValueFunc: func(key string, value interface{}, ttl time.Duration) error {
+				return errors.New("redis OOM")
+			},
+		}
+
+		service := userService{repo: repoMock, redis: redisMock}
+		_, errObj := service.UserLogin(validRequest)
+
+		if errObj.Code != 500 {
+			t.Errorf("expected code 500 on redis save error, got %d", errObj.Code)
+		}
+		if errObj.MessageToSend != "Invalid username or password" {
+			t.Errorf("expected 'Invalid username or password', got '%s'", errObj.MessageToSend)
+		}
+	})
+}
+
