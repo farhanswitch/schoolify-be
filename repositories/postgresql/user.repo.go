@@ -111,7 +111,7 @@ func (UserPostgresRepo) UserLogin(user models.UserLoginRequest) (models.UserLogi
 	}
 	return models.UserLoginData{}, errUtility.CustomError{
 		Code:          http.StatusBadRequest,
-		Message:       err.Error(),
+		Message:       "User not found",
 		MessageToSend: "Invalid username or password",
 	}
 }
