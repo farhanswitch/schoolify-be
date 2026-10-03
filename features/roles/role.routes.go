@@ -11,6 +11,6 @@ func InitModule(router *chi.Mux) {
 	repo := repoPostgres.FactoryRoleRepo()
 	controller := factoryRoleController(repo)
 
-	router.With(utilities.AuthMiddleware).Post("/api/role/list", controller.getAllRolesCtrl)
+	router.With(utilities.AuthMiddleware).Get("/api/role/list", controller.getAllRolesCtrl)
 
 }
