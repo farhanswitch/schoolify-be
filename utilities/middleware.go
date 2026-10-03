@@ -108,9 +108,9 @@ func AuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		userId, _ := claims["ID"].(string)
-		username, _ := claims["Username"].(string)
-		userRole, _ := claims["Role"].(string)
+		userId, _ := claims["id"].(string)
+		username, _ := claims["username"].(string)
+		userRole, _ := claims["roleName"].(string)
 
 		if userId == "" || username == "" {
 			w.Header().Set("Content-Type", "application/json")
