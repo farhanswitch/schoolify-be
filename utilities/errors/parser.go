@@ -2,22 +2,80 @@ package custom_errors
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"strings"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/lib/pq"
 )
 
 type HashidError struct{}
 
-func SanitizeError(errorStr string) string {
-	after, isFound := strings.CutPrefix(errorStr, "Error 1644 (45000): ")
-	if isFound {
-		return after
+// SanitizeError strips database-specific prefixes (like "pq: ") from postgres driver errors.
+// Custom database errors prefixed with "ERROR " are returned as-is. Unexpected/unhandled database
+// errors return a generic "Internal Server Error. Please contact our administrator" to avoid leaking system info.
+// Other Go errors are returned as-is.
+func SanitizeError(err error) string {
+	if err == nil {
+		return ""
 	}
-	return errorStr
+
+	var pqErr *pq.Error
+	isDbErr := false
+	var msg string
+
+	if errors.As(err, &pqErr) {
+		isDbErr = true
+		msg = pqErr.Message
+	} else {
+		errStr := err.Error()
+		if strings.HasPrefix(errStr, "pq: ") {
+			isDbErr = true
+			msg = strings.TrimPrefix(errStr, "pq: ")
+		}
+	}
+
+	if isDbErr {
+		if strings.HasPrefix(msg, "ERROR ") {
+			return msg
+		}
+		return "Internal Server Error. Please contact our administrator"
+	}
+
+	return err.Error()
 }
+
+// IsUnexpectedDBError returns true if the error is a PostgreSQL database error
+// that does NOT start with the custom error prefix "ERROR ".
+func IsUnexpectedDBError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var pqErr *pq.Error
+	isDbErr := false
+	var msg string
+
+	if errors.As(err, &pqErr) {
+		isDbErr = true
+		msg = pqErr.Message
+	} else {
+		errStr := err.Error()
+		if strings.HasPrefix(errStr, "pq: ") {
+			isDbErr = true
+			msg = strings.TrimPrefix(errStr, "pq: ")
+		}
+	}
+
+	if isDbErr {
+		return !strings.HasPrefix(msg, "ERROR ")
+	}
+
+	return false
+}
+
 func (hashErr *HashidError) Error() string {
 	return "[ERR109] Invalid value."
 }

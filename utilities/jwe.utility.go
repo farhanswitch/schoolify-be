@@ -1,6 +1,7 @@
 package utilities
 
 import (
+	"encoding/json"
 	"errors"
 
 	"gopkg.in/square/go-jose.v2"
@@ -56,4 +57,49 @@ func JWEDecryptAES(jweToken string, secretKey []byte) (map[string]interface{}, e
 	}
 
 	return decryptedClaims, nil
+}
+
+// Decrypt parses and decrypts a compact JWE token, returning the original claims map.
+func Decrypt(token string, secret []byte) (map[string]interface{}, error) {
+	object, err := jose.ParseEncrypted(token)
+	if err != nil {
+		return nil, err
+	}
+
+	decrypted, err := object.Decrypt(secret)
+	if err != nil {
+		return nil, err
+	}
+
+	var claims map[string]interface{}
+	if err := json.Unmarshal(decrypted, &claims); err != nil {
+		return nil, err
+	}
+
+	return claims, nil
+}
+
+// Encrypt generates a compact JWE token from claims using AES-256-GCM symmetric encryption.
+// The secret key must be exactly 32 bytes.
+func Encrypt(claims map[string]interface{}, secret []byte) (string, error) {
+	encrypter, err := jose.NewEncrypter(
+		jose.A256GCM,
+		jose.Recipient{Algorithm: jose.DIRECT, Key: secret},
+		nil,
+	)
+	if err != nil {
+		return "", err
+	}
+
+	payload, err := json.Marshal(claims)
+	if err != nil {
+		return "", err
+	}
+
+	jwe, err := encrypter.Encrypt(payload)
+	if err != nil {
+		return "", err
+	}
+
+	return jwe.CompactSerialize()
 }

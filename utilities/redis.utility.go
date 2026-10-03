@@ -2,33 +2,49 @@ package utilities
 
 import (
 	"context"
+	"sync"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 
 	"schoolify_be/connections"
 )
 
-type RedisUtility struct{}
+type RedisUtility struct {
+	client *redis.Client
+}
 
-var redisUtility RedisUtility
+var (
+	redisUtil     *RedisUtility
+	redisUtilOnce sync.Once
+)
 
-func (ru RedisUtility) SaveValue(key string, value interface{}, ttl time.Duration) error {
-	var ctx context.Context = context.TODO()
-	err := connections.ConnectRedis().Set(ctx, key, value, ttl).Err()
-	return err
+// RedisInstance returns the singleton RedisUtility instance.
+func RedisInstance() *RedisUtility {
+	redisUtilOnce.Do(func() {
+		redisUtil = &RedisUtility{
+			client: connections.ConnectRedis(),
+		}
+	})
+	return redisUtil
 }
-func (ru RedisUtility) DeleteValue(key string) error {
-	var ctx context.Context = context.TODO()
-	err := connections.ConnectRedis().Del(ctx, key).Err()
-	return err
+
+// SaveValue saves a key-value pair in Redis with a specified Time-to-Live (TTL).
+func (r *RedisUtility) SaveValue(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+	return r.client.Set(ctx, key, value, ttl).Err()
 }
-func (ru RedisUtility) GetValue(key string) (string, error) {
-	var ctx context.Context = context.TODO()
-	value, err := connections.ConnectRedis().Get(ctx, key).Result()
-	return value, err
+
+// DeleteValue deletes a key from Redis.
+func (r *RedisUtility) DeleteValue(ctx context.Context, key string) error {
+	return r.client.Del(ctx, key).Err()
 }
-func RedisInstance() RedisUtility {
-	if redisUtility == (RedisUtility{}) {
-		redisUtility = RedisUtility{}
-	}
-	return redisUtility
+
+// GetValue retrieves a value by key from Redis.
+func (r *RedisUtility) GetValue(ctx context.Context, key string) (string, error) {
+	return r.client.Get(ctx, key).Result()
+}
+
+// GetTTL retrieves the remaining Time-To-Live (TTL) of a key from Redis.
+func (r *RedisUtility) GetTTL(ctx context.Context, key string) (time.Duration, error) {
+	return r.client.TTL(ctx, key).Result()
 }
