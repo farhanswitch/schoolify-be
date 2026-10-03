@@ -12,5 +12,6 @@ func InitModule(router *chi.Mux) {
 	controller := factoryRoleController(repo)
 
 	router.With(utilities.AuthMiddleware).Get("/api/role/list", controller.getAllRolesCtrl)
+	router.With(utilities.AuthMiddleware).Post("/api/role", controller.createCtrl)
 
 }

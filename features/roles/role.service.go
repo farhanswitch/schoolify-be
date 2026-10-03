@@ -2,6 +2,7 @@ package roles
 
 import (
 	"context"
+	"net/http"
 	models "schoolify_be/models"
 	errUtility "schoolify_be/utilities/errors"
 
@@ -10,6 +11,7 @@ import (
 
 type rolePostgresRepoInterface interface {
 	GetAll(ctx context.Context) ([]models.RoleResponse, errUtility.CustomError)
+	Create(ctx context.Context, param models.CreateRoleRequest) errUtility.CustomError
 }
 
 type roleService struct {
@@ -23,9 +25,9 @@ var service roleService
 func buildRoleTree(flatRoles []models.RoleResponse) []*models.RoleResponse {
 	nodes := make(map[uuid.UUID]*models.RoleResponse, len(flatRoles))
 	for i := range flatRoles {
-		nodes[flatRoles[i].Id] = &models.RoleResponse{
-			Id:          flatRoles[i].Id,
-			ParentId:    flatRoles[i].ParentId,
+		nodes[flatRoles[i].ID] = &models.RoleResponse{
+			ID:          flatRoles[i].ID,
+			ParentID:    flatRoles[i].ParentID,
 			Name:        flatRoles[i].Name,
 			Description: flatRoles[i].Description,
 			CreatedAt:   flatRoles[i].CreatedAt,
@@ -36,11 +38,11 @@ func buildRoleTree(flatRoles []models.RoleResponse) []*models.RoleResponse {
 
 	rootNodes := make([]*models.RoleResponse, 0)
 	for i := range flatRoles {
-		node := nodes[flatRoles[i].Id]
-		if node.ParentId == nil || *node.ParentId == uuid.Nil {
+		node := nodes[flatRoles[i].ID]
+		if node.ParentID == nil || *node.ParentID == uuid.Nil {
 			rootNodes = append(rootNodes, node)
 		} else {
-			if parent, exists := nodes[*node.ParentId]; exists {
+			if parent, exists := nodes[*node.ParentID]; exists {
 				parent.Children = append(parent.Children, node)
 			} else {
 				// Parent not found in flat list, fallback to treating as root
@@ -57,6 +59,17 @@ func (s roleService) GetAllRolesSrvc(ctx context.Context) ([]*models.RoleRespons
 		return []*models.RoleResponse{}, customErr
 	}
 	return buildRoleTree(flatList), errUtility.CustomError{}
+}
+func (s roleService) CreateRoleSrvc(ctx context.Context, param models.CreateRoleRequest) errUtility.CustomError {
+	id, err := uuid.NewV7()
+	if err != nil {
+		return errUtility.CustomError{
+			Code:    http.StatusInternalServerError,
+			Message: "Failed generate UUID",
+		}
+	}
+	param.ID = id
+	return s.repo.Create(ctx, param)
 }
 
 func factoryRoleService(repo rolePostgresRepoInterface) roleService {

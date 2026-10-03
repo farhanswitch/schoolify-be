@@ -12,6 +12,7 @@ import (
 
 type mockRoleRepo struct {
 	GetAllFunc func(ctx context.Context) ([]models.RoleResponse, errUtility.CustomError)
+	CreateFunc func(ctx context.Context, param models.CreateRoleRequest) errUtility.CustomError
 }
 
 func (m *mockRoleRepo) GetAll(ctx context.Context) ([]models.RoleResponse, errUtility.CustomError) {
@@ -19,6 +20,13 @@ func (m *mockRoleRepo) GetAll(ctx context.Context) ([]models.RoleResponse, errUt
 		return m.GetAllFunc(ctx)
 	}
 	return []models.RoleResponse{}, errUtility.CustomError{}
+}
+
+func (m *mockRoleRepo) Create(ctx context.Context, param models.CreateRoleRequest) errUtility.CustomError {
+	if m.CreateFunc != nil {
+		return m.CreateFunc(ctx, param)
+	}
+	return errUtility.CustomError{}
 }
 
 func TestBuildRoleTree(t *testing.T) {
@@ -37,24 +45,24 @@ func TestBuildRoleTree(t *testing.T) {
 
 		flatRoles := []models.RoleResponse{
 			{
-				Id:       rootID1,
+				ID:       rootID1,
 				Name:     "Super Admin",
-				ParentId: nil,
+				ParentID: nil,
 			},
 			{
-				Id:       childID1,
+				ID:       childID1,
 				Name:     "Admin School",
-				ParentId: &rootID1,
+				ParentID: &rootID1,
 			},
 			{
-				Id:       grandchildID1,
+				ID:       grandchildID1,
 				Name:     "Teacher",
-				ParentId: &childID1,
+				ParentID: &childID1,
 			},
 			{
-				Id:       rootID2,
+				ID:       rootID2,
 				Name:     "Guest",
-				ParentId: nil,
+				ParentID: nil,
 			},
 		}
 
@@ -65,14 +73,14 @@ func TestBuildRoleTree(t *testing.T) {
 		}
 
 		// First root
-		if tree[0].Id != rootID1 {
-			t.Errorf("expected first root ID %s, got %s", rootID1, tree[0].Id)
+		if tree[0].ID != rootID1 {
+			t.Errorf("expected first root ID %s, got %s", rootID1, tree[0].ID)
 		}
 		if len(tree[0].Children) != 1 {
 			t.Fatalf("expected 1 child for root 1, got %d", len(tree[0].Children))
 		}
-		if tree[0].Children[0].Id != childID1 {
-			t.Errorf("expected child ID %s, got %s", childID1, tree[0].Children[0].Id)
+		if tree[0].Children[0].ID != childID1 {
+			t.Errorf("expected child ID %s, got %s", childID1, tree[0].Children[0].ID)
 		}
 
 		// Grandchild
@@ -80,13 +88,13 @@ func TestBuildRoleTree(t *testing.T) {
 		if len(child.Children) != 1 {
 			t.Fatalf("expected 1 child for child 1, got %d", len(child.Children))
 		}
-		if child.Children[0].Id != grandchildID1 {
-			t.Errorf("expected grandchild ID %s, got %s", grandchildID1, child.Children[0].Id)
+		if child.Children[0].ID != grandchildID1 {
+			t.Errorf("expected grandchild ID %s, got %s", grandchildID1, child.Children[0].ID)
 		}
 
 		// Second root
-		if tree[1].Id != rootID2 {
-			t.Errorf("expected second root ID %s, got %s", rootID2, tree[1].Id)
+		if tree[1].ID != rootID2 {
+			t.Errorf("expected second root ID %s, got %s", rootID2, tree[1].ID)
 		}
 		if len(tree[1].Children) != 0 {
 			t.Errorf("expected 0 children for root 2, got %d", len(tree[1].Children))
@@ -99,9 +107,9 @@ func TestBuildRoleTree(t *testing.T) {
 
 		flatRoles := []models.RoleResponse{
 			{
-				Id:       rootID,
+				ID:       rootID,
 				Name:     "Root With Nil ParentId",
-				ParentId: &nilUUID,
+				ParentID: &nilUUID,
 			},
 		}
 
@@ -109,8 +117,8 @@ func TestBuildRoleTree(t *testing.T) {
 		if len(tree) != 1 {
 			t.Fatalf("expected 1 root node, got %d", len(tree))
 		}
-		if tree[0].Id != rootID {
-			t.Errorf("expected root ID %s, got %s", rootID, tree[0].Id)
+		if tree[0].ID != rootID {
+			t.Errorf("expected root ID %s, got %s", rootID, tree[0].ID)
 		}
 	})
 
@@ -120,9 +128,9 @@ func TestBuildRoleTree(t *testing.T) {
 
 		flatRoles := []models.RoleResponse{
 			{
-				Id:       roleID,
+				ID:       roleID,
 				Name:     "Orphaned Role",
-				ParentId: &missingParentID,
+				ParentID: &missingParentID,
 			},
 		}
 
@@ -130,8 +138,8 @@ func TestBuildRoleTree(t *testing.T) {
 		if len(tree) != 1 {
 			t.Fatalf("expected orphaned node to be placed at root, got %d roots", len(tree))
 		}
-		if tree[0].Id != roleID {
-			t.Errorf("expected node ID %s, got %s", roleID, tree[0].Id)
+		if tree[0].ID != roleID {
+			t.Errorf("expected node ID %s, got %s", roleID, tree[0].ID)
 		}
 	})
 }
@@ -169,14 +177,14 @@ func TestGetAllRolesSrvc(t *testing.T) {
 			GetAllFunc: func(ctx context.Context) ([]models.RoleResponse, errUtility.CustomError) {
 				return []models.RoleResponse{
 					{
-						Id:       rootID,
+						ID:       rootID,
 						Name:     "Admin",
-						ParentId: nil,
+						ParentID: nil,
 					},
 					{
-						Id:       childID,
+						ID:       childID,
 						Name:     "Staff",
-						ParentId: &rootID,
+						ParentID: &rootID,
 					},
 				}, errUtility.CustomError{}
 			},
@@ -194,8 +202,89 @@ func TestGetAllRolesSrvc(t *testing.T) {
 		if len(result[0].Children) != 1 {
 			t.Fatalf("expected 1 child role, got %d", len(result[0].Children))
 		}
-		if result[0].Children[0].Id != childID {
-			t.Errorf("expected child ID %s, got %s", childID, result[0].Children[0].Id)
+		if result[0].Children[0].ID != childID {
+			t.Errorf("expected child ID %s, got %s", childID, result[0].Children[0].ID)
+		}
+	})
+}
+
+func TestCreateRoleSrvc(t *testing.T) {
+	ctx := context.Background()
+	req := models.CreateRoleRequest{
+		Name:        "Teacher",
+		Description: "Teacher role",
+	}
+
+	t.Run("should return error when repository fails", func(t *testing.T) {
+		mockRepo := &mockRoleRepo{
+			CreateFunc: func(ctx context.Context, param models.CreateRoleRequest) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:     http.StatusInternalServerError,
+					Message:  "database error",
+					Function: "RolePostgresRepo.Create",
+				}
+			},
+		}
+
+		srv := roleService{repo: mockRepo}
+		errObj := srv.CreateRoleSrvc(ctx, req)
+
+		if errObj.Code != http.StatusInternalServerError {
+			t.Errorf("expected error code %d, got %d", http.StatusInternalServerError, errObj.Code)
+		}
+	})
+
+	t.Run("should return error when parent role does not exist (foreign key constraint)", func(t *testing.T) {
+		nonExistentParentID := uuid.New()
+		reqWithParent := models.CreateRoleRequest{
+			ParentID:    nonExistentParentID,
+			Name:        "Assistant Teacher",
+			Description: "Assistant teacher role",
+		}
+		mockRepo := &mockRoleRepo{
+			CreateFunc: func(ctx context.Context, param models.CreateRoleRequest) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusBadRequest,
+					Message:       "pq: insert or update on table \"roles\" violates foreign key constraint \"roles_parent_id_fkey\"",
+					MessageToSend: "Parent role with the specified ID does not exist",
+				}
+			},
+		}
+
+		srv := roleService{repo: mockRepo}
+		errObj := srv.CreateRoleSrvc(ctx, reqWithParent)
+
+		if errObj.Code != http.StatusBadRequest {
+			t.Errorf("expected error code %d, got %d", http.StatusBadRequest, errObj.Code)
+		}
+		if errObj.MessageToSend != "Parent role with the specified ID does not exist" {
+			t.Errorf("expected message 'Parent role with the specified ID does not exist', got '%s'", errObj.MessageToSend)
+		}
+	})
+
+	t.Run("should generate UUIDv7 and return success when repository succeeds", func(t *testing.T) {
+		var capturedParam models.CreateRoleRequest
+		mockRepo := &mockRoleRepo{
+			CreateFunc: func(ctx context.Context, param models.CreateRoleRequest) errUtility.CustomError {
+				capturedParam = param
+				return errUtility.CustomError{}
+			},
+		}
+
+		srv := roleService{repo: mockRepo}
+		errObj := srv.CreateRoleSrvc(ctx, req)
+
+		if errObj.Code != 0 {
+			t.Fatalf("expected error code 0, got %d", errObj.Code)
+		}
+		if capturedParam.ID == uuid.Nil {
+			t.Errorf("expected generated ID to not be uuid.Nil")
+		}
+		if capturedParam.ID.Version() != 7 {
+			t.Errorf("expected generated ID to be UUIDv7, got version %d", capturedParam.ID.Version())
+		}
+		if capturedParam.Name != req.Name {
+			t.Errorf("expected name %s, got %s", req.Name, capturedParam.Name)
 		}
 	})
 }
