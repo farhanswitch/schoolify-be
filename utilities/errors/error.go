@@ -5,6 +5,7 @@ type CustomError struct {
 	Message       string
 	MessageToSend string
 	Function      string
+	Property      string
 }
 
 func (e *CustomError) Error() string {
