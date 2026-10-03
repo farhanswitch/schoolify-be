@@ -137,6 +137,7 @@ func TestCreateCtrl(t *testing.T) {
 					Code:          http.StatusBadRequest,
 					Message:       "pq: insert or update on table \"roles\" violates foreign key constraint \"roles_parent_id_fkey\"",
 					MessageToSend: "Parent role with the specified ID does not exist",
+					Property:      "parentID",
 				}
 			},
 		}
@@ -164,6 +165,7 @@ func TestCreateCtrl(t *testing.T) {
 					Code:          http.StatusConflict,
 					Message:       "unique constraint",
 					MessageToSend: "Role name already exists",
+					Property:      "name",
 				}
 			},
 		}

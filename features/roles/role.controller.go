@@ -85,13 +85,25 @@ func (c roleController) createCtrl(w http.ResponseWriter, r *http.Request) {
 		}
 		utilities.Log(reqId, logLevel, path, "createCtrl", reqBody, "service execution failed", errObj)
 
-		utilities.WriteJSON(w, statusCode, map[string]interface{}{
-			"message": errObj.MessageToSend,
-			"errors": map[string]string{
-				"parentID": errObj.MessageToSend,
-			},
-		})
-		return
+		if statusCode == 500 {
+			utilities.WriteJSON(w, statusCode, map[string]interface{}{
+				"message": "Failed to create role",
+				"errors":  "Internal Server Error",
+			})
+			return
+		} else {
+			errKey := errObj.Property
+			if errKey == "" {
+				errKey = "error"
+			}
+			utilities.WriteJSON(w, statusCode, map[string]interface{}{
+				"message": "Failed to create role",
+				"errors": map[string]string{
+					errKey: errObj.MessageToSend,
+				},
+			})
+			return
+		}
 	}
 
 	utilities.Log(reqId, utilities.DEBUG, path, "createCtrl", nil, "success", nil)
