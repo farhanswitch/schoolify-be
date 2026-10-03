@@ -1,6 +1,7 @@
 package users
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"os"
@@ -51,28 +52,28 @@ func (m *mockUserRepo) UserLogin(user models.UserLoginRequest) (models.UserLogin
 }
 
 type mockRedisUtility struct {
-	SaveValueFunc   func(key string, value interface{}, ttl time.Duration) error
-	DeleteValueFunc func(key string) error
-	GetValueFunc    func(key string) (string, error)
+	SaveValueFunc   func(ctx context.Context, key string, value interface{}, ttl time.Duration) error
+	DeleteValueFunc func(ctx context.Context, key string) error
+	GetValueFunc    func(ctx context.Context, key string) (string, error)
 }
 
-func (m *mockRedisUtility) SaveValue(key string, value interface{}, ttl time.Duration) error {
+func (m *mockRedisUtility) SaveValue(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
 	if m.SaveValueFunc != nil {
-		return m.SaveValueFunc(key, value, ttl)
+		return m.SaveValueFunc(ctx, key, value, ttl)
 	}
 	return nil
 }
 
-func (m *mockRedisUtility) DeleteValue(key string) error {
+func (m *mockRedisUtility) DeleteValue(ctx context.Context, key string) error {
 	if m.DeleteValueFunc != nil {
-		return m.DeleteValueFunc(key)
+		return m.DeleteValueFunc(ctx, key)
 	}
 	return nil
 }
 
-func (m *mockRedisUtility) GetValue(key string) (string, error) {
+func (m *mockRedisUtility) GetValue(ctx context.Context, key string) (string, error) {
 	if m.GetValueFunc != nil {
-		return m.GetValueFunc(key)
+		return m.GetValueFunc(ctx, key)
 	}
 	return "", nil
 }
@@ -310,11 +311,11 @@ func TestUserLoginSrvc(t *testing.T) {
 		savedKeys := make(map[string]any)
 
 		redisMock := &mockRedisUtility{
-			DeleteValueFunc: func(key string) error {
+			DeleteValueFunc: func(ctx context.Context, key string) error {
 				deletedKeys = append(deletedKeys, key)
 				return nil
 			},
-			SaveValueFunc: func(key string, value interface{}, ttl time.Duration) error {
+			SaveValueFunc: func(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
 				savedKeys[key] = value
 				return nil
 			},
@@ -405,7 +406,7 @@ func TestUserLoginSrvc(t *testing.T) {
 			},
 		}
 		redisMock := &mockRedisUtility{
-			DeleteValueFunc: func(key string) error {
+			DeleteValueFunc: func(ctx context.Context, key string) error {
 				if key == "TOKEN_johndoe_1" {
 					return errors.New("redis connection timeout")
 				}
@@ -431,7 +432,7 @@ func TestUserLoginSrvc(t *testing.T) {
 			},
 		}
 		redisMock := &mockRedisUtility{
-			DeleteValueFunc: func(key string) error {
+			DeleteValueFunc: func(ctx context.Context, key string) error {
 				if key == "TOKEN_johndoe_2" {
 					return errors.New("redis error slot 2")
 				}
@@ -457,10 +458,10 @@ func TestUserLoginSrvc(t *testing.T) {
 			},
 		}
 		redisMock := &mockRedisUtility{
-			DeleteValueFunc: func(key string) error {
+			DeleteValueFunc: func(ctx context.Context, key string) error {
 				return nil
 			},
-			SaveValueFunc: func(key string, value interface{}, ttl time.Duration) error {
+			SaveValueFunc: func(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
 				return errors.New("redis OOM")
 			},
 		}

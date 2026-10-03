@@ -1,6 +1,7 @@
 package users
 
 import (
+	"context"
 	"fmt"
 	"schoolify_be/configs"
 	models "schoolify_be/models"
@@ -21,9 +22,9 @@ type userPostgresRepoInterface interface {
 }
 
 type redisUtilityInterface interface {
-	SaveValue(key string, value interface{}, ttl time.Duration) error
-	DeleteValue(key string) error
-	GetValue(key string) (string, error)
+	SaveValue(ctx context.Context, key string, value interface{}, ttl time.Duration) error
+	DeleteValue(ctx context.Context, key string) error
+	GetValue(ctx context.Context, key string) (string, error)
 }
 
 type userService struct {
@@ -120,7 +121,7 @@ func (s userService) UserLogin(param models.UserLoginRequest) (map[string]any, e
 		redisUtil = utilities.RedisInstance()
 	}
 
-	err = redisUtil.DeleteValue(fmt.Sprintf("TOKEN_%s_1", loginData.Username))
+	err = redisUtil.DeleteValue(context.Background(), fmt.Sprintf("TOKEN_%s_1", loginData.Username))
 	if err != nil {
 		return map[string]any{}, custom_errors.CustomError{
 			Code:          500,
@@ -128,14 +129,14 @@ func (s userService) UserLogin(param models.UserLoginRequest) (map[string]any, e
 			MessageToSend: "Invalid username or password"}
 	}
 
-	err = redisUtil.DeleteValue(fmt.Sprintf("TOKEN_%s_2", loginData.Username))
+	err = redisUtil.DeleteValue(context.Background(), fmt.Sprintf("TOKEN_%s_2", loginData.Username))
 	if err != nil {
 		return map[string]any{}, custom_errors.CustomError{
 			Code:          500,
 			Message:       err.Error(),
 			MessageToSend: "Invalid username or password"}
 	}
-	err = redisUtil.SaveValue(fmt.Sprintf("TOKEN_%s_1", loginData.Username), strToken, time.Duration(configs.GetConfig().Service.SessionTime)*time.Second)
+	err = redisUtil.SaveValue(context.Background(), fmt.Sprintf("TOKEN_%s_1", loginData.Username), strToken, time.Duration(configs.GetConfig().Service.SessionTime)*time.Second)
 	if err != nil {
 		return map[string]any{}, custom_errors.CustomError{
 			Code:          500,
