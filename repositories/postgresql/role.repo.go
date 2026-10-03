@@ -91,6 +91,8 @@ func (r RolePostgresRepo) Create(ctx context.Context, param models.CreateRoleReq
 				Code:          http.StatusBadRequest,
 				Message:       errStr,
 				MessageToSend: "Parent role with the specified ID does not exist",
+				Property:      "parentID",
+				Function:      "RolePostgresRepo.Create",
 			}
 		}
 
@@ -99,6 +101,8 @@ func (r RolePostgresRepo) Create(ctx context.Context, param models.CreateRoleReq
 				Code:          http.StatusConflict,
 				Message:       errStr,
 				MessageToSend: "Role name already exists",
+				Property:      "name",
+				Function:      "RolePostgresRepo.Create",
 			}
 		}
 
@@ -106,6 +110,7 @@ func (r RolePostgresRepo) Create(ctx context.Context, param models.CreateRoleReq
 			Code:          http.StatusInternalServerError,
 			Message:       errStr,
 			MessageToSend: "Failed create role",
+			Function:      "RolePostgresRepo.Create",
 		}
 	}
 	return errUtility.CustomError{}
