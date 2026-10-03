@@ -8,6 +8,7 @@ import (
 	configs "schoolify_be/configs"
 	connections "schoolify_be/connections"
 	featAuthor "schoolify_be/features/authors"
+	featRole "schoolify_be/features/roles"
 	featUser "schoolify_be/features/users"
 
 	chi "github.com/go-chi/chi/v5"
@@ -46,6 +47,7 @@ func initModules() {
 func internalModules(router *chi.Mux) {
 	featAuthor.InitModule(router)
 	featUser.InitModule(router)
+	featRole.InitModule(router)
 	// users.InitModule(router)
 	// files.InitModule(router)
 	// markets.InitModule(router)
