@@ -16,6 +16,7 @@ type mockMenuRepo struct {
 	CreateFunc  func(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
 	UpdateFunc  func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError
 	GetByIDFunc func(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError)
+	DeleteFunc  func(ctx context.Context, menuID uuid.UUID) errUtility.CustomError
 }
 
 func (m *mockMenuRepo) GetAll(ctx context.Context) ([]models.MenuResponse, errUtility.CustomError) {
@@ -45,6 +46,14 @@ func (m *mockMenuRepo) GetByID(ctx context.Context, menuID uuid.UUID) (models.Me
 	}
 	return models.MenuResponse{}, errUtility.CustomError{}
 }
+
+func (m *mockMenuRepo) Delete(ctx context.Context, menuID uuid.UUID) errUtility.CustomError {
+	if m.DeleteFunc != nil {
+		return m.DeleteFunc(ctx, menuID)
+	}
+	return errUtility.CustomError{}
+}
+
 
 func TestBuildMenuTree(t *testing.T) {
 	t.Run("should return empty slice when input is empty", func(t *testing.T) {
@@ -507,5 +516,99 @@ func TestUpdateMenuSrvc(t *testing.T) {
 		}
 	})
 }
+
+func TestDeleteSrvc(t *testing.T) {
+	ctx := context.Background()
+	menuID := uuid.New()
+
+	t.Run("should return error when repository fails", func(t *testing.T) {
+		mockRepo := &mockMenuRepo{
+			DeleteFunc: func(ctx context.Context, id uuid.UUID) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusInternalServerError,
+					Message:       "internal database failure",
+					MessageToSend: "Failed delete menu",
+					Function:      "MenuPostgresRepo.Delete",
+				}
+			},
+		}
+
+		srv := menuService{repo: mockRepo}
+		errObj := srv.DeleteSrvc(ctx, menuID)
+
+		if errObj.Code != http.StatusInternalServerError {
+			t.Errorf("expected error code %d, got %d", http.StatusInternalServerError, errObj.Code)
+		}
+		if errObj.MessageToSend != "Failed delete menu" {
+			t.Errorf("expected message 'Failed delete menu', got '%s'", errObj.MessageToSend)
+		}
+	})
+
+	t.Run("should return error when menu has child menus", func(t *testing.T) {
+		mockRepo := &mockMenuRepo{
+			DeleteFunc: func(ctx context.Context, id uuid.UUID) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusBadRequest,
+					Message:       "cannot delete menu that has child menus",
+					MessageToSend: "Cannot delete menu because it has child menus",
+					Property:      "id",
+					Function:      "MenuPostgresRepo.Delete",
+				}
+			},
+		}
+
+		srv := menuService{repo: mockRepo}
+		errObj := srv.DeleteSrvc(ctx, menuID)
+
+		if errObj.Code != http.StatusBadRequest {
+			t.Errorf("expected error code %d, got %d", http.StatusBadRequest, errObj.Code)
+		}
+		if errObj.MessageToSend != "Cannot delete menu because it has child menus" {
+			t.Errorf("expected message 'Cannot delete menu because it has child menus', got '%s'", errObj.MessageToSend)
+		}
+		if errObj.Property != "id" {
+			t.Errorf("expected property 'id', got '%s'", errObj.Property)
+		}
+	})
+
+	t.Run("should return error when menu to delete is not found", func(t *testing.T) {
+		mockRepo := &mockMenuRepo{
+			DeleteFunc: func(ctx context.Context, id uuid.UUID) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusNotFound,
+					MessageToSend: "Menu not found",
+					Property:      "id",
+					Function:      "MenuPostgresRepo.Delete",
+				}
+			},
+		}
+
+		srv := menuService{repo: mockRepo}
+		errObj := srv.DeleteSrvc(ctx, menuID)
+
+		if errObj.Code != http.StatusNotFound {
+			t.Errorf("expected error code %d, got %d", http.StatusNotFound, errObj.Code)
+		}
+		if errObj.MessageToSend != "Menu not found" {
+			t.Errorf("expected message 'Menu not found', got '%s'", errObj.MessageToSend)
+		}
+	})
+
+	t.Run("should return success when repository succeeds", func(t *testing.T) {
+		mockRepo := &mockMenuRepo{
+			DeleteFunc: func(ctx context.Context, id uuid.UUID) errUtility.CustomError {
+				return errUtility.CustomError{}
+			},
+		}
+
+		srv := menuService{repo: mockRepo}
+		errObj := srv.DeleteSrvc(ctx, menuID)
+
+		if errObj.Code != 0 {
+			t.Fatalf("expected error code 0, got %d", errObj.Code)
+		}
+	})
+}
+
 
 

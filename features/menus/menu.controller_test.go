@@ -21,6 +21,7 @@ type mockMenuService struct {
 	CreateMenuSrvcFunc  func(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
 	GetByIDSrvcFunc     func(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError)
 	UpdateMenuSrvcFunc  func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError
+	DeleteSrvcFunc      func(ctx context.Context, menuID uuid.UUID) errUtility.CustomError
 }
 
 func (m *mockMenuService) GetAllMenusSrvc(ctx context.Context) ([]*models.MenuResponse, errUtility.CustomError) {
@@ -50,6 +51,14 @@ func (m *mockMenuService) UpdateMenuSrvc(ctx context.Context, param models.Updat
 	}
 	return errUtility.CustomError{}
 }
+
+func (m *mockMenuService) DeleteSrvc(ctx context.Context, menuID uuid.UUID) errUtility.CustomError {
+	if m.DeleteSrvcFunc != nil {
+		return m.DeleteSrvcFunc(ctx, menuID)
+	}
+	return errUtility.CustomError{}
+}
+
 
 func TestGetAllMenusCtrl(t *testing.T) {
 	t.Run("should return 500 when service fails", func(t *testing.T) {
@@ -558,5 +567,144 @@ func TestUpdateCtrl(t *testing.T) {
 		}
 	})
 }
+
+func TestDeleteCtrl(t *testing.T) {
+	testUUID := uuid.New()
+
+	newRequestWithParam := func(method, target, paramKey, paramVal string) *http.Request {
+		req := httptest.NewRequest(method, target, nil)
+		rctx := chi.NewRouteContext()
+		if paramKey != "" {
+			rctx.URLParams.Add(paramKey, paramVal)
+		}
+		return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	}
+
+	t.Run("should return 400 when menuID is missing from path parameter", func(t *testing.T) {
+		ctrl := menuController{service: &mockMenuService{}}
+		req := newRequestWithParam(http.MethodDelete, "/api/menu/", "", "")
+		w := httptest.NewRecorder()
+
+		ctrl.DeleteCtrl(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "menuID path parameter is required") {
+			t.Errorf("expected response to contain 'menuID path parameter is required', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 400 when menuID is not a valid UUID", func(t *testing.T) {
+		ctrl := menuController{service: &mockMenuService{}}
+		req := newRequestWithParam(http.MethodDelete, "/api/menu/not-a-uuid", "menuID", "not-a-uuid")
+		w := httptest.NewRecorder()
+
+		ctrl.DeleteCtrl(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Invalid menuID") {
+			t.Errorf("expected response to contain 'Invalid menuID', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 400 when menu has child menus and cannot be deleted", func(t *testing.T) {
+		mockSrv := &mockMenuService{
+			DeleteSrvcFunc: func(ctx context.Context, menuID uuid.UUID) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusBadRequest,
+					MessageToSend: "Cannot delete menu because it has child menus",
+					Property:      "id",
+				}
+			},
+		}
+		ctrl := menuController{service: mockSrv}
+		req := newRequestWithParam(http.MethodDelete, "/api/menu/"+testUUID.String(), "menuID", testUUID.String())
+		w := httptest.NewRecorder()
+
+		ctrl.DeleteCtrl(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Cannot delete menu because it has child menus") {
+			t.Errorf("expected response to contain 'Cannot delete menu because it has child menus', got %s", w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), `"id"`) {
+			t.Errorf("expected response errors to specify 'id' field, got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 404 when menu to delete is not found", func(t *testing.T) {
+		mockSrv := &mockMenuService{
+			DeleteSrvcFunc: func(ctx context.Context, menuID uuid.UUID) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusNotFound,
+					MessageToSend: "Menu not found",
+					Property:      "id",
+				}
+			},
+		}
+		ctrl := menuController{service: mockSrv}
+		req := newRequestWithParam(http.MethodDelete, "/api/menu/"+testUUID.String(), "menuID", testUUID.String())
+		w := httptest.NewRecorder()
+
+		ctrl.DeleteCtrl(w, req)
+
+		if w.Code != http.StatusNotFound {
+			t.Errorf("expected status 404, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Menu not found") {
+			t.Errorf("expected response to contain 'Menu not found', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 500 when service fails unexpectedly", func(t *testing.T) {
+		mockSrv := &mockMenuService{
+			DeleteSrvcFunc: func(ctx context.Context, menuID uuid.UUID) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusInternalServerError,
+					Message:       "internal database failure",
+					MessageToSend: "Failed delete menu",
+				}
+			},
+		}
+		ctrl := menuController{service: mockSrv}
+		req := newRequestWithParam(http.MethodDelete, "/api/menu/"+testUUID.String(), "menuID", testUUID.String())
+		w := httptest.NewRecorder()
+
+		ctrl.DeleteCtrl(w, req)
+
+		if w.Code != http.StatusInternalServerError {
+			t.Errorf("expected status 500, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Internal Server Error") {
+			t.Errorf("expected response to contain 'Internal Server Error', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 200 on successful menu deletion", func(t *testing.T) {
+		mockSrv := &mockMenuService{
+			DeleteSrvcFunc: func(ctx context.Context, menuID uuid.UUID) errUtility.CustomError {
+				return errUtility.CustomError{}
+			},
+		}
+		ctrl := menuController{service: mockSrv}
+		req := newRequestWithParam(http.MethodDelete, "/api/menu/"+testUUID.String(), "menuID", testUUID.String())
+		w := httptest.NewRecorder()
+
+		ctrl.DeleteCtrl(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("expected status 200, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Menu deleted successfully") {
+			t.Errorf("expected response to contain 'Menu deleted successfully', got %s", w.Body.String())
+		}
+	})
+}
+
 
 

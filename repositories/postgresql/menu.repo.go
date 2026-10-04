@@ -207,9 +207,75 @@ func (r MenuPostgresRepo) Update(ctx context.Context, param models.UpdateMenuReq
 	return errUtility.CustomError{}
 }
 
+func (r MenuPostgresRepo) Delete(ctx context.Context, menuID uuid.UUID) errUtility.CustomError {
+	db := connections.DbPostgres()
+
+	var childID uuid.UUID
+	err := db.QueryRowContext(ctx, "SELECT id FROM menus WHERE parent_id = $1 LIMIT 1;", menuID).Scan(&childID)
+	if err == nil {
+		return errUtility.CustomError{
+			Code:          http.StatusBadRequest,
+			Message:       "cannot delete menu that has child menus",
+			MessageToSend: "Cannot delete menu because it has child menus",
+			Property:      "id",
+			Function:      "MenuPostgresRepo.Delete",
+		}
+	} else if err != sql.ErrNoRows {
+		return errUtility.CustomError{
+			Code:          http.StatusInternalServerError,
+			Message:       err.Error(),
+			MessageToSend: "Failed delete menu",
+			Function:      "MenuPostgresRepo.Delete",
+		}
+	}
+
+	query := "DELETE FROM menus WHERE id = $1;"
+	res, err := db.ExecContext(ctx, query, menuID)
+	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "menus_parent_id_fkey") || strings.Contains(errStr, "violates foreign key constraint") {
+			return errUtility.CustomError{
+				Code:          http.StatusBadRequest,
+				Message:       errStr,
+				MessageToSend: "Cannot delete menu because it has child menus",
+				Property:      "id",
+				Function:      "MenuPostgresRepo.Delete",
+			}
+		}
+
+		return errUtility.CustomError{
+			Code:          http.StatusInternalServerError,
+			Message:       errStr,
+			MessageToSend: "Failed delete menu",
+			Function:      "MenuPostgresRepo.Delete",
+		}
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return errUtility.CustomError{
+			Code:          http.StatusInternalServerError,
+			Message:       err.Error(),
+			MessageToSend: "Failed delete menu",
+			Function:      "MenuPostgresRepo.Delete",
+		}
+	} else {
+		if rowsAffected == 0 {
+			return errUtility.CustomError{
+				Code:          http.StatusNotFound,
+				MessageToSend: "Menu not found",
+				Function:      "MenuPostgresRepo.Delete",
+				Property:      "id",
+			}
+		}
+	}
+	return errUtility.CustomError{}
+}
+
 func FactoryMenuRepo() MenuPostgresRepo {
 	if menuRepo == (MenuPostgresRepo{}) {
 		menuRepo = MenuPostgresRepo{}
 	}
 	return menuRepo
 }
+
