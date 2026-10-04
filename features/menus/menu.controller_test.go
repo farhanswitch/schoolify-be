@@ -16,7 +16,15 @@ import (
 )
 
 type mockMenuService struct {
-	CreateMenuSrvcFunc func(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
+	GetAllMenusSrvcFunc func(ctx context.Context) ([]*models.MenuResponse, errUtility.CustomError)
+	CreateMenuSrvcFunc  func(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
+}
+
+func (m *mockMenuService) GetAllMenusSrvc(ctx context.Context) ([]*models.MenuResponse, errUtility.CustomError) {
+	if m.GetAllMenusSrvcFunc != nil {
+		return m.GetAllMenusSrvcFunc(ctx)
+	}
+	return []*models.MenuResponse{}, errUtility.CustomError{}
 }
 
 func (m *mockMenuService) CreateMenuSrvc(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError {
@@ -24,6 +32,63 @@ func (m *mockMenuService) CreateMenuSrvc(ctx context.Context, param models.Creat
 		return m.CreateMenuSrvcFunc(ctx, param)
 	}
 	return errUtility.CustomError{}
+}
+
+func TestGetAllMenusCtrl(t *testing.T) {
+	t.Run("should return 500 when service fails", func(t *testing.T) {
+		mockSrv := &mockMenuService{
+			GetAllMenusSrvcFunc: func(ctx context.Context) ([]*models.MenuResponse, errUtility.CustomError) {
+				return nil, errUtility.CustomError{
+					Code:          http.StatusInternalServerError,
+					Message:       "db failure",
+					MessageToSend: "Failed get menus",
+				}
+			},
+		}
+		ctrl := menuController{service: mockSrv}
+		req := httptest.NewRequest(http.MethodGet, "/api/menu/list", nil)
+		w := httptest.NewRecorder()
+
+		ctrl.getAllMenusCtrl(w, req)
+
+		if w.Code != http.StatusInternalServerError {
+			t.Errorf("expected status 500, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Failed get menus") {
+			t.Errorf("expected response to contain 'Failed get menus', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 200 with menu tree on success", func(t *testing.T) {
+		mockTree := []*models.MenuResponse{
+			{
+				Id:          uuid.New().String(),
+				Name:        "Dashboard",
+				Description: "Dashboard menu",
+				Children:    []*models.MenuResponse{},
+			},
+		}
+		mockSrv := &mockMenuService{
+			GetAllMenusSrvcFunc: func(ctx context.Context) ([]*models.MenuResponse, errUtility.CustomError) {
+				return mockTree, errUtility.CustomError{}
+			},
+		}
+		ctrl := menuController{service: mockSrv}
+		req := httptest.NewRequest(http.MethodGet, "/api/menu/list", nil)
+		w := httptest.NewRecorder()
+
+		ctrl.getAllMenusCtrl(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("expected status 200, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Menu list") {
+			t.Errorf("expected response to contain 'Menu list', got %s", w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "Dashboard") {
+			t.Errorf("expected response to contain 'Dashboard', got %s", w.Body.String())
+		}
+	})
 }
 
 func TestCreateCtrl(t *testing.T) {

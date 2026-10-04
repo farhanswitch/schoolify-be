@@ -2,6 +2,7 @@ package postgresql
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"strings"
 
@@ -15,6 +16,62 @@ import (
 type MenuPostgresRepo struct{}
 
 var menuRepo MenuPostgresRepo
+
+func (r MenuPostgresRepo) GetAll(ctx context.Context) ([]models.MenuResponse, errUtility.CustomError) {
+	db := connections.DbPostgres()
+	query := "SELECT id, parent_id, name, description, created_at, updated_at FROM menus"
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return []models.MenuResponse{}, errUtility.CustomError{}
+		} else {
+			return []models.MenuResponse{}, errUtility.CustomError{
+				Code:     http.StatusInternalServerError,
+				Message:  err.Error(),
+				Function: "MenuPostgresRepo.GetAll",
+			}
+		}
+	}
+	defer rows.Close()
+
+	var list []models.MenuResponse
+	for rows.Next() {
+		var data models.MenuResponse
+		var parentId, description, updatedAt sql.NullString
+
+		err = rows.Scan(&data.Id, &parentId, &data.Name, &description, &data.CreatedAt, &updatedAt)
+		if err != nil {
+			return []models.MenuResponse{}, errUtility.CustomError{
+				Code:     http.StatusInternalServerError,
+				Message:  err.Error(),
+				Function: "MenuPostgresRepo.GetAll",
+			}
+		}
+
+		if parentId.Valid && parentId.String != "" {
+			pId := parentId.String
+			data.ParentId = &pId
+		}
+		if description.Valid {
+			data.Description = description.String
+		}
+		if updatedAt.Valid {
+			data.UpdatedAt = updatedAt.String
+		}
+
+		list = append(list, data)
+	}
+
+	if err := rows.Err(); err != nil {
+		return []models.MenuResponse{}, errUtility.CustomError{
+			Code:     http.StatusInternalServerError,
+			Message:  err.Error(),
+			Function: "MenuPostgresRepo.GetAll",
+		}
+	}
+
+	return list, errUtility.CustomError{}
+}
 
 func (r MenuPostgresRepo) Create(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError {
 	db := connections.DbPostgres()

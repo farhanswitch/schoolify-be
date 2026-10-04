@@ -12,11 +12,11 @@ type CreateMenuRequest struct {
 }
 
 type MenuResponse struct {
-	Children    []*MenuResponse `json:"children"`
-	ID          uuid.UUID       `json:"id"`
+	Id          string          `json:"id"`
+	ParentId    *string         `json:"parentId"`
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	CreatedAt   string          `json:"createdAt"`
 	UpdatedAt   string          `json:"updatedAt"`
-	ParentID    *uuid.UUID      `json:"parentID"`
+	Children    []*MenuResponse `json:"children"`
 }

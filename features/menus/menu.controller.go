@@ -20,11 +20,34 @@ func init() {
 }
 
 type menuServiceInterface interface {
+	GetAllMenusSrvc(ctx context.Context) ([]*models.MenuResponse, errUtility.CustomError)
 	CreateMenuSrvc(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
 }
 
 type menuController struct {
 	service menuServiceInterface
+}
+
+func (c menuController) getAllMenusCtrl(w http.ResponseWriter, r *http.Request) {
+	reqID := utilities.GetReqID(r.Context())
+	path := r.URL.Path
+
+	utilities.Log(reqID, utilities.DEBUG, path, "menuController.getAll", nil, "Incoming Request", nil)
+
+	tree, errObj := c.service.GetAllMenusSrvc(r.Context())
+	if errObj.Code > 0 {
+		utilities.Log(reqID, utilities.ERROR, path, "getAllCtrl", nil, "service execution failed", errObj)
+		utilities.WriteJSON(w, http.StatusInternalServerError, map[string]string{"errors": errObj.MessageToSend})
+		return
+	}
+	utilities.Log(reqID, utilities.DEBUG, path, "getAllCtrl", nil, "success", nil)
+	if tree == nil {
+		tree = []*models.MenuResponse{}
+	}
+	utilities.WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"message": "Menu list",
+		"data":    tree,
+	})
 }
 
 func (c menuController) createCtrl(w http.ResponseWriter, r *http.Request) {
@@ -46,7 +69,7 @@ func (c menuController) createCtrl(w http.ResponseWriter, r *http.Request) {
 	if err := validate.Struct(reqBody); err != nil {
 		errMap := errUtility.ParseError(err)
 		utilities.Log(reqId, utilities.WARN, path, "menuController.createCtrl", reqBody, "validation failed", errMap)
-		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+		utilities.WriteJSON(w, http.StatusUnprocessableEntity, map[string]interface{}{
 			"message": "Validation failed",
 			"errors":  errMap,
 		})
