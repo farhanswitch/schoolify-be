@@ -10,6 +10,12 @@ type CreateRoleRequest struct {
 	Name        string    `json:"name" validate:"required,gte=3,lte=30"`
 	Description string    `json:"description" validate:"required,gte=3,lte=100"`
 }
+type UpdateRoleRequest struct {
+	ID          uuid.UUID `json:"id" validate:"required,lte=40"`
+	ParentID    uuid.UUID `json:"parentID" validate:"omitempty,lte=40"` // Can be empty if root role
+	Name        string    `json:"name" validate:"required,gte=3,lte=30"`
+	Description string    `json:"description" validate:"required,gte=3,lte=100"`
+}
 
 type AssignMenuRequest struct {
 	MenuIds uuid.UUIDs `json:"menuIds" validate:"required,dive,required"`

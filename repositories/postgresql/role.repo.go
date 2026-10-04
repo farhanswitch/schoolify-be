@@ -115,6 +115,68 @@ func (r RolePostgresRepo) Create(ctx context.Context, param models.CreateRoleReq
 	}
 	return errUtility.CustomError{}
 }
+func (r RolePostgresRepo) Update(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError {
+	db := connections.DbPostgres()
+
+	var parentID any = nil
+	if param.ParentID != uuid.Nil {
+		parentID = param.ParentID
+	}
+
+	query := "UPDATE roles SET name=$1, description=$2, parent_id=$3 WHERE id=$4;"
+	res, err := db.ExecContext(ctx, query, param.Name, param.Description, parentID, param.ID)
+
+	if err != nil {
+		errStr := err.Error()
+
+		if strings.Contains(errStr, "roles_parent_id_fkey") || strings.Contains(errStr, "violates foreign key constraint") {
+			return errUtility.CustomError{
+				Code:          http.StatusBadRequest,
+				Message:       errStr,
+				MessageToSend: "Parent role with the specified ID does not exist",
+				Property:      "parentID",
+				Function:      "RolePostgresRepo.Update",
+			}
+		}
+
+		if strings.Contains(errStr, "unique constraint") {
+			return errUtility.CustomError{
+				Code:          http.StatusConflict,
+				Message:       errStr,
+				MessageToSend: "Role name already exists",
+				Property:      "name",
+				Function:      "RolePostgresRepo.Update",
+			}
+		}
+
+		return errUtility.CustomError{
+			Code:          http.StatusInternalServerError,
+			Message:       errStr,
+			MessageToSend: "Failed update role",
+			Function:      "RolePostgresRepo.Update",
+		}
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return errUtility.CustomError{
+			Code:          http.StatusInternalServerError,
+			Message:       err.Error(),
+			MessageToSend: "Failed update role",
+			Function:      "RolePostgresRepo.Update",
+		}
+	} else {
+		if rowsAffected == 0 {
+			return errUtility.CustomError{
+				Code:          http.StatusNotFound,
+				MessageToSend: "Role not found",
+				Function:      "RolePostgresRepo.Update",
+				Property:      "id",
+			}
+		}
+	}
+	return errUtility.CustomError{}
+}
 func FactoryRoleRepo() RolePostgresRepo {
 	if roleRepo == (RolePostgresRepo{}) {
 		roleRepo = RolePostgresRepo{}
