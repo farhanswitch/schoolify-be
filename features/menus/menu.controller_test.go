@@ -20,6 +20,7 @@ type mockMenuService struct {
 	GetAllMenusSrvcFunc func(ctx context.Context) ([]*models.MenuResponse, errUtility.CustomError)
 	CreateMenuSrvcFunc  func(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
 	GetByIDSrvcFunc     func(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError)
+	UpdateMenuSrvcFunc  func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError
 }
 
 func (m *mockMenuService) GetAllMenusSrvc(ctx context.Context) ([]*models.MenuResponse, errUtility.CustomError) {
@@ -41,6 +42,13 @@ func (m *mockMenuService) GetByIDSrvc(ctx context.Context, menuID uuid.UUID) (mo
 		return m.GetByIDSrvcFunc(ctx, menuID)
 	}
 	return models.MenuResponse{}, errUtility.CustomError{}
+}
+
+func (m *mockMenuService) UpdateMenuSrvc(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError {
+	if m.UpdateMenuSrvcFunc != nil {
+		return m.UpdateMenuSrvcFunc(ctx, param)
+	}
+	return errUtility.CustomError{}
 }
 
 func TestGetAllMenusCtrl(t *testing.T) {
@@ -369,4 +377,186 @@ func TestGetByIDCtrl(t *testing.T) {
 		}
 	})
 }
+
+func TestUpdateCtrl(t *testing.T) {
+	defaultMenuID := uuid.New()
+	defaultPayload := map[string]interface{}{
+		"id":          defaultMenuID.String(),
+		"name":        "Dashboard",
+		"description": "Main dashboard menu",
+	}
+
+	buildJSONBody := func(payload interface{}) *bytes.Buffer {
+		data, _ := json.Marshal(payload)
+		return bytes.NewBuffer(data)
+	}
+
+	t.Run("should return 400 when JSON body is invalid", func(t *testing.T) {
+		ctrl := menuController{service: &mockMenuService{}}
+		req := httptest.NewRequest(http.MethodPut, "/api/menu", strings.NewReader("{invalid-json"))
+		w := httptest.NewRecorder()
+
+		ctrl.updateCtrl(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Invalid data") {
+			t.Errorf("expected response to contain 'Invalid data', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 422 when validation fails (missing required id)", func(t *testing.T) {
+		ctrl := menuController{service: &mockMenuService{}}
+		req := httptest.NewRequest(http.MethodPut, "/api/menu", buildJSONBody(map[string]interface{}{
+			"name":        "Dashboard",
+			"description": "missing id",
+		}))
+		w := httptest.NewRecorder()
+
+		ctrl.updateCtrl(w, req)
+
+		if w.Code != http.StatusUnprocessableEntity {
+			t.Errorf("expected status 422, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Validation failed") {
+			t.Errorf("expected response to contain 'Validation failed', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 400 when parentID does not exist in database", func(t *testing.T) {
+		parentID := uuid.New().String()
+		payload := map[string]interface{}{
+			"id":          defaultMenuID.String(),
+			"parentID":    parentID,
+			"name":        "Sub Dashboard",
+			"description": "Sub dashboard menu",
+		}
+		mockSrv := &mockMenuService{
+			UpdateMenuSrvcFunc: func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusBadRequest,
+					Message:       "pq: insert or update on table \"menus\" violates foreign key constraint \"menus_parent_id_fkey\"",
+					MessageToSend: "Parent menu with the specified ID does not exist",
+					Property:      "parentID",
+				}
+			},
+		}
+		ctrl := menuController{service: mockSrv}
+		req := httptest.NewRequest(http.MethodPut, "/api/menu", buildJSONBody(payload))
+		w := httptest.NewRecorder()
+
+		ctrl.updateCtrl(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Parent menu with the specified ID does not exist") {
+			t.Errorf("expected response to contain 'Parent menu with the specified ID does not exist', got %s", w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), `"parentID"`) {
+			t.Errorf("expected response errors to specify 'parentID' field, got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 409 when menu name already exists", func(t *testing.T) {
+		mockSrv := &mockMenuService{
+			UpdateMenuSrvcFunc: func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusConflict,
+					Message:       "unique constraint",
+					MessageToSend: "Menu name already exists",
+					Property:      "name",
+				}
+			},
+		}
+		ctrl := menuController{service: mockSrv}
+		req := httptest.NewRequest(http.MethodPut, "/api/menu", buildJSONBody(defaultPayload))
+		w := httptest.NewRecorder()
+
+		ctrl.updateCtrl(w, req)
+
+		if w.Code != http.StatusConflict {
+			t.Errorf("expected status 409, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Menu name already exists") {
+			t.Errorf("expected response to contain 'Menu name already exists', got %s", w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), `"name"`) {
+			t.Errorf("expected response errors to specify 'name' field, got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 404 when menu to update is not found", func(t *testing.T) {
+		mockSrv := &mockMenuService{
+			UpdateMenuSrvcFunc: func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusNotFound,
+					MessageToSend: "Menu not found",
+					Property:      "id",
+				}
+			},
+		}
+		ctrl := menuController{service: mockSrv}
+		req := httptest.NewRequest(http.MethodPut, "/api/menu", buildJSONBody(defaultPayload))
+		w := httptest.NewRecorder()
+
+		ctrl.updateCtrl(w, req)
+
+		if w.Code != http.StatusNotFound {
+			t.Errorf("expected status 404, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Menu not found") {
+			t.Errorf("expected response to contain 'Menu not found', got %s", w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), `"id"`) {
+			t.Errorf("expected response errors to specify 'id' field, got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 500 when service fails unexpectedly", func(t *testing.T) {
+		mockSrv := &mockMenuService{
+			UpdateMenuSrvcFunc: func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusInternalServerError,
+					Message:       "internal database failure",
+					MessageToSend: "Failed update menu",
+				}
+			},
+		}
+		ctrl := menuController{service: mockSrv}
+		req := httptest.NewRequest(http.MethodPut, "/api/menu", buildJSONBody(defaultPayload))
+		w := httptest.NewRecorder()
+
+		ctrl.updateCtrl(w, req)
+
+		if w.Code != http.StatusInternalServerError {
+			t.Errorf("expected status 500, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Internal Server Error") {
+			t.Errorf("expected response to contain 'Internal Server Error', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 201 Created on successful menu update", func(t *testing.T) {
+		mockSrv := &mockMenuService{
+			UpdateMenuSrvcFunc: func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError {
+				return errUtility.CustomError{}
+			},
+		}
+		ctrl := menuController{service: mockSrv}
+		req := httptest.NewRequest(http.MethodPut, "/api/menu", buildJSONBody(defaultPayload))
+		w := httptest.NewRecorder()
+
+		ctrl.updateCtrl(w, req)
+
+		if w.Code != http.StatusCreated {
+			t.Errorf("expected status 201, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Menu updated successfully") {
+			t.Errorf("expected response to contain 'Menu updated successfully', got %s", w.Body.String())
+		}
+	})
+}
+
 

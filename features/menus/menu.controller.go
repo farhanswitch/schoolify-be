@@ -25,6 +25,7 @@ type menuServiceInterface interface {
 	GetAllMenusSrvc(ctx context.Context) ([]*models.MenuResponse, errUtility.CustomError)
 	CreateMenuSrvc(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
 	GetByIDSrvc(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError)
+	UpdateMenuSrvc(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError
 }
 
 type menuController struct {
@@ -172,6 +173,69 @@ func (c menuController) createCtrl(w http.ResponseWriter, r *http.Request) {
 	utilities.Log(reqId, utilities.DEBUG, path, "menuController.createCtrl", nil, "success", nil)
 	utilities.WriteJSON(w, http.StatusCreated, map[string]string{
 		"message": "Menu created successfully",
+	})
+}
+
+func (c menuController) updateCtrl(w http.ResponseWriter, r *http.Request) {
+	reqId := utilities.GetReqID(r.Context())
+	path := r.URL.Path
+
+	var reqBody models.UpdateMenuRequest
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		utilities.Log(reqId, utilities.ERROR, path, "menuController.updateCtrl", nil, "json decode failed", err)
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors": map[string][]string{
+				"data": []string{"Invalid data"},
+			},
+		})
+		return
+	}
+	utilities.Log(reqId, utilities.DEBUG, path, "menuController.updateCtrl", reqBody, "incoming request", nil)
+	if err := validate.Struct(reqBody); err != nil {
+		errMap := errUtility.ParseError(err)
+		utilities.Log(reqId, utilities.WARN, path, "menuController.updateCtrl", reqBody, "validation failed", errMap)
+		utilities.WriteJSON(w, http.StatusUnprocessableEntity, map[string]interface{}{
+			"message": "Validation failed",
+			"errors":  errMap,
+		})
+		return
+	}
+
+	if errObj := c.service.UpdateMenuSrvc(r.Context(), reqBody); errObj.Code > 0 {
+		errObj.Compile()
+		statusCode := int(errObj.Code)
+
+		logLevel := utilities.ERROR
+		if statusCode < 500 {
+			logLevel = utilities.WARN
+		}
+		utilities.Log(reqId, logLevel, path, "menuController.updateCtrl", reqBody, "service execution failed", errObj)
+
+		if statusCode == 500 {
+			utilities.WriteJSON(w, statusCode, map[string]interface{}{
+				"message": "Failed to update menu",
+				"errors":  "Internal Server Error",
+			})
+			return
+		} else {
+			errKey := errObj.Property
+			if errKey == "" {
+				errKey = "error"
+			}
+			utilities.WriteJSON(w, statusCode, map[string]interface{}{
+				"message": "Failed to update menu",
+				"errors": map[string]string{
+					errKey: errObj.MessageToSend,
+				},
+			})
+			return
+		}
+	}
+
+	utilities.Log(reqId, utilities.DEBUG, path, "menuController.updateCtrl", nil, "success", nil)
+	utilities.WriteJSON(w, http.StatusCreated, map[string]string{
+		"message": "Menu updated successfully",
 	})
 }
 

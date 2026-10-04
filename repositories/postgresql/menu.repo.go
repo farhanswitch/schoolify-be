@@ -145,6 +145,68 @@ func (r MenuPostgresRepo) GetByID(ctx context.Context, menuID uuid.UUID) (models
 	return data, errUtility.CustomError{}
 }
 
+func (r MenuPostgresRepo) Update(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError {
+	db := connections.DbPostgres()
+
+	var parentID any = nil
+	if param.ParentID != uuid.Nil {
+		parentID = param.ParentID
+	}
+
+	query := "UPDATE menus SET name=$1, description=$2, parent_id=$3 WHERE id=$4;"
+	res, err := db.ExecContext(ctx, query, param.Name, param.Description, parentID, param.ID)
+	if err != nil {
+		errStr := err.Error()
+
+		if strings.Contains(errStr, "menus_parent_id_fkey") || strings.Contains(errStr, "violates foreign key constraint") {
+			return errUtility.CustomError{
+				Code:          http.StatusBadRequest,
+				Message:       errStr,
+				MessageToSend: "Parent menu with the specified ID does not exist",
+				Property:      "parentID",
+				Function:      "MenuPostgresRepo.Update",
+			}
+		}
+
+		if strings.Contains(errStr, "unique constraint") {
+			return errUtility.CustomError{
+				Code:          http.StatusConflict,
+				Message:       errStr,
+				MessageToSend: "Menu name already exists",
+				Property:      "name",
+				Function:      "MenuPostgresRepo.Update",
+			}
+		}
+
+		return errUtility.CustomError{
+			Code:          http.StatusInternalServerError,
+			Message:       errStr,
+			MessageToSend: "Failed update menu",
+			Function:      "MenuPostgresRepo.Update",
+		}
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return errUtility.CustomError{
+			Code:          http.StatusInternalServerError,
+			Message:       err.Error(),
+			MessageToSend: "Failed update menu",
+			Function:      "MenuPostgresRepo.Update",
+		}
+	} else {
+		if rowsAffected == 0 {
+			return errUtility.CustomError{
+				Code:          http.StatusNotFound,
+				MessageToSend: "Menu not found",
+				Function:      "MenuPostgresRepo.Update",
+				Property:      "id",
+			}
+		}
+	}
+	return errUtility.CustomError{}
+}
+
 func FactoryMenuRepo() MenuPostgresRepo {
 	if menuRepo == (MenuPostgresRepo{}) {
 		menuRepo = MenuPostgresRepo{}

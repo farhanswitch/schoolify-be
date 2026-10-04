@@ -14,6 +14,7 @@ import (
 type mockMenuRepo struct {
 	GetAllFunc  func(ctx context.Context) ([]models.MenuResponse, errUtility.CustomError)
 	CreateFunc  func(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
+	UpdateFunc  func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError
 	GetByIDFunc func(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError)
 }
 
@@ -27,6 +28,13 @@ func (m *mockMenuRepo) GetAll(ctx context.Context) ([]models.MenuResponse, errUt
 func (m *mockMenuRepo) Create(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError {
 	if m.CreateFunc != nil {
 		return m.CreateFunc(ctx, param)
+	}
+	return errUtility.CustomError{}
+}
+
+func (m *mockMenuRepo) Update(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError {
+	if m.UpdateFunc != nil {
+		return m.UpdateFunc(ctx, param)
 	}
 	return errUtility.CustomError{}
 }
@@ -364,4 +372,140 @@ func TestGetByIDSrvc(t *testing.T) {
 		}
 	})
 }
+
+func TestUpdateMenuSrvc(t *testing.T) {
+	ctx := context.Background()
+	req := models.UpdateMenuRequest{
+		ID:          uuid.New(),
+		Name:        "Updated Dashboard",
+		Description: "Updated dashboard menu",
+	}
+
+	t.Run("should return error when repository fails", func(t *testing.T) {
+		mockRepo := &mockMenuRepo{
+			UpdateFunc: func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusInternalServerError,
+					Message:       "database error",
+					MessageToSend: "Failed update menu",
+					Function:      "MenuPostgresRepo.Update",
+				}
+			},
+		}
+
+		srv := menuService{repo: mockRepo}
+		errObj := srv.UpdateMenuSrvc(ctx, req)
+
+		if errObj.Code != http.StatusInternalServerError {
+			t.Errorf("expected error code %d, got %d", http.StatusInternalServerError, errObj.Code)
+		}
+		if errObj.MessageToSend != "Failed update menu" {
+			t.Errorf("expected message 'Failed update menu', got '%s'", errObj.MessageToSend)
+		}
+	})
+
+	t.Run("should return error when parent menu does not exist (foreign key constraint)", func(t *testing.T) {
+		reqWithParent := models.UpdateMenuRequest{
+			ID:          req.ID,
+			ParentID:    uuid.New(),
+			Name:        "Sub Menu",
+			Description: "Sub menu description",
+		}
+		mockRepo := &mockMenuRepo{
+			UpdateFunc: func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusBadRequest,
+					Message:       "pq: insert or update on table \"menus\" violates foreign key constraint \"menus_parent_id_fkey\"",
+					MessageToSend: "Parent menu with the specified ID does not exist",
+					Property:      "parentID",
+					Function:      "MenuPostgresRepo.Update",
+				}
+			},
+		}
+
+		srv := menuService{repo: mockRepo}
+		errObj := srv.UpdateMenuSrvc(ctx, reqWithParent)
+
+		if errObj.Code != http.StatusBadRequest {
+			t.Errorf("expected error code %d, got %d", http.StatusBadRequest, errObj.Code)
+		}
+		if errObj.Property != "parentID" {
+			t.Errorf("expected property 'parentID', got '%s'", errObj.Property)
+		}
+	})
+
+	t.Run("should return error when menu name already exists (unique constraint)", func(t *testing.T) {
+		mockRepo := &mockMenuRepo{
+			UpdateFunc: func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusConflict,
+					Message:       "unique constraint",
+					MessageToSend: "Menu name already exists",
+					Property:      "name",
+					Function:      "MenuPostgresRepo.Update",
+				}
+			},
+		}
+
+		srv := menuService{repo: mockRepo}
+		errObj := srv.UpdateMenuSrvc(ctx, req)
+
+		if errObj.Code != http.StatusConflict {
+			t.Errorf("expected error code %d, got %d", http.StatusConflict, errObj.Code)
+		}
+		if errObj.Property != "name" {
+			t.Errorf("expected property 'name', got '%s'", errObj.Property)
+		}
+	})
+
+	t.Run("should return error when menu to update is not found (404)", func(t *testing.T) {
+		mockRepo := &mockMenuRepo{
+			UpdateFunc: func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusNotFound,
+					MessageToSend: "Menu not found",
+					Function:      "MenuPostgresRepo.Update",
+					Property:      "id",
+				}
+			},
+		}
+
+		srv := menuService{repo: mockRepo}
+		errObj := srv.UpdateMenuSrvc(ctx, req)
+
+		if errObj.Code != http.StatusNotFound {
+			t.Errorf("expected error code %d, got %d", http.StatusNotFound, errObj.Code)
+		}
+		if errObj.MessageToSend != "Menu not found" {
+			t.Errorf("expected message 'Menu not found', got '%s'", errObj.MessageToSend)
+		}
+		if errObj.Property != "id" {
+			t.Errorf("expected property 'id', got '%s'", errObj.Property)
+		}
+	})
+
+	t.Run("should return success when repository succeeds", func(t *testing.T) {
+		var capturedParam models.UpdateMenuRequest
+		mockRepo := &mockMenuRepo{
+			UpdateFunc: func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError {
+				capturedParam = param
+				return errUtility.CustomError{}
+			},
+		}
+
+		srv := menuService{repo: mockRepo}
+		errObj := srv.UpdateMenuSrvc(ctx, req)
+
+		if errObj.Code != 0 {
+			t.Fatalf("expected error code 0, got %d", errObj.Code)
+		}
+		if capturedParam.ID != req.ID {
+			t.Errorf("expected ID %s, got %s", req.ID, capturedParam.ID)
+		}
+		if capturedParam.Name != req.Name {
+			t.Errorf("expected name %s, got %s", req.Name, capturedParam.Name)
+		}
+	})
+}
+
 
