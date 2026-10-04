@@ -125,7 +125,6 @@ func (r RolePostgresRepo) Update(ctx context.Context, param models.UpdateRoleReq
 
 	query := "UPDATE roles SET name=$1, description=$2, parent_id=$3 WHERE id=$4;"
 	res, err := db.ExecContext(ctx, query, param.Name, param.Description, parentID, param.ID)
-
 	if err != nil {
 		errStr := err.Error()
 
@@ -176,6 +175,34 @@ func (r RolePostgresRepo) Update(ctx context.Context, param models.UpdateRoleReq
 		}
 	}
 	return errUtility.CustomError{}
+}
+func (r RolePostgresRepo) GetByID(ctx context.Context, roleID uuid.UUID) (models.RoleResponse, errUtility.CustomError) {
+	db := connections.DbPostgres()
+	var data models.RoleResponse
+	var parentId, description, updatedAt sql.NullString
+	query := "SELECT id, parent_id, name, description, created_at, updated_at FROM roles WHERE id=$1;"
+	err := db.QueryRowContext(ctx, query, roleID).Scan(&data.ID, &parentId, &data.Name, &description, &data.CreatedAt, &updatedAt)
+
+	if err != nil {
+		return models.RoleResponse{}, errUtility.CustomError{
+			Code:          http.StatusNotFound,
+			Message:       err.Error(),
+			MessageToSend: "Role not found",
+			Function:      "RolePostgresRepo.GetByID",
+		}
+	}
+	if parentId.Valid && parentId.String != "" {
+		if parsedUUID, err := uuid.Parse(parentId.String); err == nil {
+			data.ParentID = &parsedUUID
+		}
+	}
+	if description.Valid {
+		data.Description = description.String
+	}
+	if updatedAt.Valid {
+		data.UpdatedAt = updatedAt.String
+	}
+	return data, errUtility.CustomError{}
 }
 func FactoryRoleRepo() RolePostgresRepo {
 	if roleRepo == (RolePostgresRepo{}) {

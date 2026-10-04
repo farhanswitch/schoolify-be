@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
@@ -18,6 +19,7 @@ type mockRoleService struct {
 	GetAllRolesSrvcFunc func(ctx context.Context) ([]*models.RoleResponse, errUtility.CustomError)
 	CreateRoleSrvcFunc  func(ctx context.Context, param models.CreateRoleRequest) errUtility.CustomError
 	UpdateRoleSrvcFunc  func(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError
+	GetByIDSrvcFunc     func(ctx context.Context, roleID uuid.UUID) (models.RoleResponse, errUtility.CustomError)
 }
 
 func (m *mockRoleService) GetAllRolesSrvc(ctx context.Context) ([]*models.RoleResponse, errUtility.CustomError) {
@@ -39,6 +41,13 @@ func (m *mockRoleService) UpdateRoleSrvc(ctx context.Context, param models.Updat
 		return m.UpdateRoleSrvcFunc(ctx, param)
 	}
 	return errUtility.CustomError{}
+}
+
+func (m *mockRoleService) GetByIDSrvc(ctx context.Context, roleID uuid.UUID) (models.RoleResponse, errUtility.CustomError) {
+	if m.GetByIDSrvcFunc != nil {
+		return m.GetByIDSrvcFunc(ctx, roleID)
+	}
+	return models.RoleResponse{}, errUtility.CustomError{}
 }
 
 func TestGetAllRolesCtrl(t *testing.T) {
@@ -392,4 +401,125 @@ func TestUpdateCtrl(t *testing.T) {
 		}
 	})
 }
+
+func TestGetByIDCtrl(t *testing.T) {
+	testUUID := uuid.New()
+
+	newRequestWithParam := func(method, target, paramKey, paramVal string) *http.Request {
+		req := httptest.NewRequest(method, target, nil)
+		rctx := chi.NewRouteContext()
+		if paramKey != "" {
+			rctx.URLParams.Add(paramKey, paramVal)
+		}
+		return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	}
+
+	t.Run("should return 400 when roleID is missing from path parameter", func(t *testing.T) {
+		ctrl := roleController{service: &mockRoleService{}}
+		req := newRequestWithParam(http.MethodGet, "/api/role/", "", "")
+		w := httptest.NewRecorder()
+
+		ctrl.GetByIDCtrl(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "roleID path parameter is required") {
+			t.Errorf("expected response to contain 'roleID path parameter is required', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 400 when roleID is not a valid UUID", func(t *testing.T) {
+		ctrl := roleController{service: &mockRoleService{}}
+		req := newRequestWithParam(http.MethodGet, "/api/role/not-a-uuid", "roleID", "not-a-uuid")
+		w := httptest.NewRecorder()
+
+		ctrl.GetByIDCtrl(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Invalid roleID") {
+			t.Errorf("expected response to contain 'Invalid roleID', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 404 when role is not found", func(t *testing.T) {
+		mockSrv := &mockRoleService{
+			GetByIDSrvcFunc: func(ctx context.Context, roleID uuid.UUID) (models.RoleResponse, errUtility.CustomError) {
+				return models.RoleResponse{}, errUtility.CustomError{
+					Code:          http.StatusNotFound,
+					MessageToSend: "Role not found",
+					Property:      "id",
+				}
+			},
+		}
+		ctrl := roleController{service: mockSrv}
+		req := newRequestWithParam(http.MethodGet, "/api/role/"+testUUID.String(), "roleID", testUUID.String())
+		w := httptest.NewRecorder()
+
+		ctrl.GetByIDCtrl(w, req)
+
+		if w.Code != http.StatusNotFound {
+			t.Errorf("expected status 404, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Role not found") {
+			t.Errorf("expected response to contain 'Role not found', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 500 when service fails unexpectedly", func(t *testing.T) {
+		mockSrv := &mockRoleService{
+			GetByIDSrvcFunc: func(ctx context.Context, roleID uuid.UUID) (models.RoleResponse, errUtility.CustomError) {
+				return models.RoleResponse{}, errUtility.CustomError{
+					Code:          http.StatusInternalServerError,
+					Message:       "internal database failure",
+					MessageToSend: "Failed get role",
+				}
+			},
+		}
+		ctrl := roleController{service: mockSrv}
+		req := newRequestWithParam(http.MethodGet, "/api/role/"+testUUID.String(), "roleID", testUUID.String())
+		w := httptest.NewRecorder()
+
+		ctrl.GetByIDCtrl(w, req)
+
+		if w.Code != http.StatusInternalServerError {
+			t.Errorf("expected status 500, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Internal Server Error") {
+			t.Errorf("expected response to contain 'Internal Server Error', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 200 with role data on success", func(t *testing.T) {
+		expectedRole := models.RoleResponse{
+			ID:          testUUID,
+			Name:        "Teacher",
+			Description: "Teacher role",
+			CreatedAt:   "2026-10-04 12:00:00",
+		}
+		mockSrv := &mockRoleService{
+			GetByIDSrvcFunc: func(ctx context.Context, roleID uuid.UUID) (models.RoleResponse, errUtility.CustomError) {
+				return expectedRole, errUtility.CustomError{}
+			},
+		}
+		ctrl := roleController{service: mockSrv}
+		req := newRequestWithParam(http.MethodGet, "/api/role/"+testUUID.String(), "roleID", testUUID.String())
+		w := httptest.NewRecorder()
+
+		ctrl.GetByIDCtrl(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("expected status 200, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Role retrieved successfully") {
+			t.Errorf("expected response to contain 'Role retrieved successfully', got %s", w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "Teacher") {
+			t.Errorf("expected response to contain role name 'Teacher', got %s", w.Body.String())
+		}
+	})
+}
+
 

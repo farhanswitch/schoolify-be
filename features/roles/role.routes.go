@@ -12,6 +12,7 @@ func InitModule(router *chi.Mux) {
 	controller := factoryRoleController(repo)
 
 	router.With(utilities.AuthMiddleware).Get("/api/role/list", controller.getAllRolesCtrl)
+	router.With(utilities.AuthMiddleware).Get("/api/role/{roleID}", controller.GetByIDCtrl)
 	router.With(utilities.AuthMiddleware).Post("/api/role", controller.createCtrl)
 	router.With(utilities.AuthMiddleware).Put("/api/role", controller.updateCtrl)
 

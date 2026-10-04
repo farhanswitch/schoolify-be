@@ -13,6 +13,7 @@ type rolePostgresRepoInterface interface {
 	GetAll(ctx context.Context) ([]models.RoleResponse, errUtility.CustomError)
 	Create(ctx context.Context, param models.CreateRoleRequest) errUtility.CustomError
 	Update(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError
+	GetByID(ctx context.Context, roleID uuid.UUID) (models.RoleResponse, errUtility.CustomError)
 }
 
 type roleService struct {
@@ -74,6 +75,9 @@ func (s roleService) CreateRoleSrvc(ctx context.Context, param models.CreateRole
 }
 func (s roleService) UpdateRoleSrvc(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError {
 	return s.repo.Update(ctx, param)
+}
+func (s roleService) GetByIDSrvc(ctx context.Context, roleID uuid.UUID) (models.RoleResponse, errUtility.CustomError) {
+	return s.repo.GetByID(ctx, roleID)
 }
 
 func factoryRoleService(repo rolePostgresRepoInterface) roleService {

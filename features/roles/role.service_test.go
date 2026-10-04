@@ -11,9 +11,10 @@ import (
 )
 
 type mockRoleRepo struct {
-	GetAllFunc func(ctx context.Context) ([]models.RoleResponse, errUtility.CustomError)
-	CreateFunc func(ctx context.Context, param models.CreateRoleRequest) errUtility.CustomError
-	UpdateFunc func(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError
+	GetAllFunc  func(ctx context.Context) ([]models.RoleResponse, errUtility.CustomError)
+	CreateFunc  func(ctx context.Context, param models.CreateRoleRequest) errUtility.CustomError
+	UpdateFunc  func(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError
+	GetByIDFunc func(ctx context.Context, roleID uuid.UUID) (models.RoleResponse, errUtility.CustomError)
 }
 
 func (m *mockRoleRepo) GetAll(ctx context.Context) ([]models.RoleResponse, errUtility.CustomError) {
@@ -35,6 +36,13 @@ func (m *mockRoleRepo) Update(ctx context.Context, param models.UpdateRoleReques
 		return m.UpdateFunc(ctx, param)
 	}
 	return errUtility.CustomError{}
+}
+
+func (m *mockRoleRepo) GetByID(ctx context.Context, roleID uuid.UUID) (models.RoleResponse, errUtility.CustomError) {
+	if m.GetByIDFunc != nil {
+		return m.GetByIDFunc(ctx, roleID)
+	}
+	return models.RoleResponse{}, errUtility.CustomError{}
 }
 
 func TestBuildRoleTree(t *testing.T) {
@@ -431,4 +439,63 @@ func TestUpdateRoleSrvc(t *testing.T) {
 		}
 	})
 }
+
+func TestGetByIDSrvc(t *testing.T) {
+	ctx := context.Background()
+	roleID := uuid.New()
+
+	t.Run("should return error when repository fails / role not found", func(t *testing.T) {
+		mockRepo := &mockRoleRepo{
+			GetByIDFunc: func(ctx context.Context, id uuid.UUID) (models.RoleResponse, errUtility.CustomError) {
+				return models.RoleResponse{}, errUtility.CustomError{
+					Code:          http.StatusNotFound,
+					Message:       "sql: no rows in result set",
+					MessageToSend: "Role not found",
+					Function:      "RolePostgresRepo.GetByID",
+				}
+			},
+		}
+
+		srv := roleService{repo: mockRepo}
+		result, errObj := srv.GetByIDSrvc(ctx, roleID)
+
+		if errObj.Code != http.StatusNotFound {
+			t.Errorf("expected error code %d, got %d", http.StatusNotFound, errObj.Code)
+		}
+		if errObj.MessageToSend != "Role not found" {
+			t.Errorf("expected message 'Role not found', got '%s'", errObj.MessageToSend)
+		}
+		if result.ID != uuid.Nil {
+			t.Errorf("expected empty RoleResponse, got ID %s", result.ID)
+		}
+	})
+
+	t.Run("should return role when repository succeeds", func(t *testing.T) {
+		expectedRole := models.RoleResponse{
+			ID:          roleID,
+			Name:        "Admin",
+			Description: "Administrator role",
+			CreatedAt:   "2026-10-04 12:00:00",
+		}
+		mockRepo := &mockRoleRepo{
+			GetByIDFunc: func(ctx context.Context, id uuid.UUID) (models.RoleResponse, errUtility.CustomError) {
+				return expectedRole, errUtility.CustomError{}
+			},
+		}
+
+		srv := roleService{repo: mockRepo}
+		result, errObj := srv.GetByIDSrvc(ctx, roleID)
+
+		if errObj.Code != 0 {
+			t.Fatalf("expected error code 0, got %d", errObj.Code)
+		}
+		if result.ID != roleID {
+			t.Errorf("expected role ID %s, got %s", roleID, result.ID)
+		}
+		if result.Name != expectedRole.Name {
+			t.Errorf("expected role name %s, got %s", expectedRole.Name, result.Name)
+		}
+	})
+}
+
 
