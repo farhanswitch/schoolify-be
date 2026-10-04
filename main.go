@@ -11,6 +11,7 @@ import (
 	featMenu "schoolify_be/features/menus"
 	featRole "schoolify_be/features/roles"
 	featUser "schoolify_be/features/users"
+	utilities "schoolify_be/utilities"
 
 	chi "github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -60,11 +61,12 @@ func initPlugins(router *chi.Mux) {
 	router.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
-		ExposedHeaders:   []string{"Link", "Xrf-Token"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "X-Req-Id", "X-Req-ID", "xrfs-token"},
+		ExposedHeaders:   []string{"Link", "X-Req-Id", "X-Req-ID", "xrfs-token"},
 		AllowCredentials: false,
 		MaxAge:           300,
 	}))
+	router.Use(utilities.ReqIDMiddleware)
 	router.Use(middleware.Recoverer)
 
 }
