@@ -22,6 +22,7 @@ func init() {
 type roleServiceInterface interface {
 	GetAllRolesSrvc(ctx context.Context) ([]*models.RoleResponse, errUtility.CustomError)
 	CreateRoleSrvc(ctx context.Context, param models.CreateRoleRequest) errUtility.CustomError
+	UpdateRoleSrvc(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError
 }
 
 type roleController struct {
@@ -59,7 +60,7 @@ func (c roleController) createCtrl(w http.ResponseWriter, r *http.Request) {
 		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"message": "Validation failed",
 			"errors": map[string][]string{
-				"payload": []string{"Invalid payload"},
+				"data": []string{"Invalid data"},
 			},
 		})
 		return
@@ -109,6 +110,68 @@ func (c roleController) createCtrl(w http.ResponseWriter, r *http.Request) {
 	utilities.Log(reqId, utilities.DEBUG, path, "createCtrl", nil, "success", nil)
 	utilities.WriteJSON(w, http.StatusCreated, map[string]string{
 		"message": "Role created successfully",
+	})
+}
+func (c roleController) updateCtrl(w http.ResponseWriter, r *http.Request) {
+	reqId := utilities.GetReqID(r.Context())
+	path := r.URL.Path
+
+	var reqBody models.UpdateRoleRequest
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		utilities.Log(reqId, utilities.ERROR, path, "roleController.updateCtrl", nil, "json decode failed", err)
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors": map[string][]string{
+				"data": []string{"Invalid data"},
+			},
+		})
+		return
+	}
+	utilities.Log(reqId, utilities.DEBUG, path, "roleController.updateCtrl", reqBody, "incoming request", nil)
+	if err := validate.Struct(reqBody); err != nil {
+		errMap := errUtility.ParseError(err)
+		utilities.Log(reqId, utilities.WARN, path, "roleController.updateCtrl", reqBody, "validation failed", errMap)
+		utilities.WriteJSON(w, http.StatusUnprocessableEntity, map[string]interface{}{
+			"message": "Validation failed",
+			"errors":  errMap,
+		})
+		return
+	}
+
+	if errObj := c.service.UpdateRoleSrvc(r.Context(), reqBody); errObj.Code > 0 {
+		errObj.Compile()
+		statusCode := int(errObj.Code)
+
+		logLevel := utilities.ERROR
+		if statusCode < 500 {
+			logLevel = utilities.WARN
+		}
+		utilities.Log(reqId, logLevel, path, "roleController.updateCtrl", reqBody, "service execution failed", errObj)
+
+		if statusCode == 500 {
+			utilities.WriteJSON(w, statusCode, map[string]interface{}{
+				"message": "Failed to update role",
+				"errors":  "Internal Server Error",
+			})
+			return
+		} else {
+			errKey := errObj.Property
+			if errKey == "" {
+				errKey = "error"
+			}
+			utilities.WriteJSON(w, statusCode, map[string]interface{}{
+				"message": "Failed to update role",
+				"errors": map[string]string{
+					errKey: errObj.MessageToSend,
+				},
+			})
+			return
+		}
+	}
+
+	utilities.Log(reqId, utilities.DEBUG, path, "roleController.updateCtrl", nil, "success", nil)
+	utilities.WriteJSON(w, http.StatusCreated, map[string]string{
+		"message": "Role updated successfully",
 	})
 }
 

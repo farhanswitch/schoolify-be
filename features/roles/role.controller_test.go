@@ -17,6 +17,7 @@ import (
 type mockRoleService struct {
 	GetAllRolesSrvcFunc func(ctx context.Context) ([]*models.RoleResponse, errUtility.CustomError)
 	CreateRoleSrvcFunc  func(ctx context.Context, param models.CreateRoleRequest) errUtility.CustomError
+	UpdateRoleSrvcFunc  func(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError
 }
 
 func (m *mockRoleService) GetAllRolesSrvc(ctx context.Context) ([]*models.RoleResponse, errUtility.CustomError) {
@@ -29,6 +30,13 @@ func (m *mockRoleService) GetAllRolesSrvc(ctx context.Context) ([]*models.RoleRe
 func (m *mockRoleService) CreateRoleSrvc(ctx context.Context, param models.CreateRoleRequest) errUtility.CustomError {
 	if m.CreateRoleSrvcFunc != nil {
 		return m.CreateRoleSrvcFunc(ctx, param)
+	}
+	return errUtility.CustomError{}
+}
+
+func (m *mockRoleService) UpdateRoleSrvc(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError {
+	if m.UpdateRoleSrvcFunc != nil {
+		return m.UpdateRoleSrvcFunc(ctx, param)
 	}
 	return errUtility.CustomError{}
 }
@@ -102,8 +110,8 @@ func TestCreateCtrl(t *testing.T) {
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("expected status 400, got %d", w.Code)
 		}
-		if !strings.Contains(w.Body.String(), "Invalid payload") {
-			t.Errorf("expected response to contain 'Invalid payload', got %s", w.Body.String())
+		if !strings.Contains(w.Body.String(), "Invalid data") {
+			t.Errorf("expected response to contain 'Invalid data', got %s", w.Body.String())
 		}
 	})
 
@@ -203,3 +211,185 @@ func TestCreateCtrl(t *testing.T) {
 		}
 	})
 }
+
+func TestUpdateCtrl(t *testing.T) {
+	defaultRoleID := uuid.New()
+	defaultPayload := map[string]interface{}{
+		"id":          defaultRoleID.String(),
+		"name":        "Staff",
+		"description": "School staff member",
+	}
+
+	buildJSONBody := func(payload interface{}) *bytes.Buffer {
+		data, _ := json.Marshal(payload)
+		return bytes.NewBuffer(data)
+	}
+
+	t.Run("should return 400 when JSON body is invalid", func(t *testing.T) {
+		ctrl := roleController{service: &mockRoleService{}}
+		req := httptest.NewRequest(http.MethodPut, "/api/role", strings.NewReader("{invalid-json"))
+		w := httptest.NewRecorder()
+
+		ctrl.updateCtrl(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Invalid data") {
+			t.Errorf("expected response to contain 'Invalid data', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 422 when validation fails (missing required id)", func(t *testing.T) {
+		ctrl := roleController{service: &mockRoleService{}}
+		req := httptest.NewRequest(http.MethodPut, "/api/role", buildJSONBody(map[string]interface{}{
+			"name":        "Staff",
+			"description": "missing id",
+		}))
+		w := httptest.NewRecorder()
+
+		ctrl.updateCtrl(w, req)
+
+		if w.Code != http.StatusUnprocessableEntity {
+			t.Errorf("expected status 422, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Validation failed") {
+			t.Errorf("expected response to contain 'Validation failed', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 400 when parentID does not exist in database", func(t *testing.T) {
+		parentID := uuid.New().String()
+		payload := map[string]interface{}{
+			"id":          defaultRoleID.String(),
+			"parentID":    parentID,
+			"name":        "Guest",
+			"description": "Guest role",
+		}
+		mockSrv := &mockRoleService{
+			UpdateRoleSrvcFunc: func(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusBadRequest,
+					Message:       "pq: insert or update on table \"roles\" violates foreign key constraint \"roles_parent_id_fkey\"",
+					MessageToSend: "Parent role with the specified ID does not exist",
+					Property:      "parentID",
+				}
+			},
+		}
+		ctrl := roleController{service: mockSrv}
+		req := httptest.NewRequest(http.MethodPut, "/api/role", buildJSONBody(payload))
+		w := httptest.NewRecorder()
+
+		ctrl.updateCtrl(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Parent role with the specified ID does not exist") {
+			t.Errorf("expected response to contain 'Parent role with the specified ID does not exist', got %s", w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), `"parentID"`) {
+			t.Errorf("expected response errors to specify 'parentID' field, got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 409 when role name already exists", func(t *testing.T) {
+		mockSrv := &mockRoleService{
+			UpdateRoleSrvcFunc: func(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusConflict,
+					Message:       "unique constraint",
+					MessageToSend: "Role name already exists",
+					Property:      "name",
+				}
+			},
+		}
+		ctrl := roleController{service: mockSrv}
+		req := httptest.NewRequest(http.MethodPut, "/api/role", buildJSONBody(defaultPayload))
+		w := httptest.NewRecorder()
+
+		ctrl.updateCtrl(w, req)
+
+		if w.Code != http.StatusConflict {
+			t.Errorf("expected status 409, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Role name already exists") {
+			t.Errorf("expected response to contain 'Role name already exists', got %s", w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), `"name"`) {
+			t.Errorf("expected response errors to specify 'name' field, got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 404 when role to update is not found", func(t *testing.T) {
+		mockSrv := &mockRoleService{
+			UpdateRoleSrvcFunc: func(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusNotFound,
+					MessageToSend: "Role not found",
+					Property:      "id",
+				}
+			},
+		}
+		ctrl := roleController{service: mockSrv}
+		req := httptest.NewRequest(http.MethodPut, "/api/role", buildJSONBody(defaultPayload))
+		w := httptest.NewRecorder()
+
+		ctrl.updateCtrl(w, req)
+
+		if w.Code != http.StatusNotFound {
+			t.Errorf("expected status 404, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Role not found") {
+			t.Errorf("expected response to contain 'Role not found', got %s", w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), `"id"`) {
+			t.Errorf("expected response errors to specify 'id' field, got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 500 when service fails unexpectedly", func(t *testing.T) {
+		mockSrv := &mockRoleService{
+			UpdateRoleSrvcFunc: func(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusInternalServerError,
+					Message:       "internal database failure",
+					MessageToSend: "Failed update role",
+				}
+			},
+		}
+		ctrl := roleController{service: mockSrv}
+		req := httptest.NewRequest(http.MethodPut, "/api/role", buildJSONBody(defaultPayload))
+		w := httptest.NewRecorder()
+
+		ctrl.updateCtrl(w, req)
+
+		if w.Code != http.StatusInternalServerError {
+			t.Errorf("expected status 500, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Internal Server Error") {
+			t.Errorf("expected response to contain 'Internal Server Error', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 201 Created on successful role update", func(t *testing.T) {
+		mockSrv := &mockRoleService{
+			UpdateRoleSrvcFunc: func(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError {
+				return errUtility.CustomError{}
+			},
+		}
+		ctrl := roleController{service: mockSrv}
+		req := httptest.NewRequest(http.MethodPut, "/api/role", buildJSONBody(defaultPayload))
+		w := httptest.NewRecorder()
+
+		ctrl.updateCtrl(w, req)
+
+		if w.Code != http.StatusCreated {
+			t.Errorf("expected status 201, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Role updated successfully") {
+			t.Errorf("expected response to contain 'Role updated successfully', got %s", w.Body.String())
+		}
+	})
+}
+
