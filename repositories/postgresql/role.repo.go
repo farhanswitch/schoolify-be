@@ -204,6 +204,70 @@ func (r RolePostgresRepo) GetByID(ctx context.Context, roleID uuid.UUID) (models
 	}
 	return data, errUtility.CustomError{}
 }
+func (r RolePostgresRepo) Delete(ctx context.Context, roleID uuid.UUID) errUtility.CustomError {
+	db := connections.DbPostgres()
+
+	var childID uuid.UUID
+	err := db.QueryRowContext(ctx, "SELECT id FROM roles WHERE parent_id = $1 LIMIT 1;", roleID).Scan(&childID)
+	if err == nil {
+		return errUtility.CustomError{
+			Code:          http.StatusBadRequest,
+			Message:       "cannot delete role that has child roles",
+			MessageToSend: "Cannot delete role because it has child roles",
+			Property:      "id",
+			Function:      "RolePostgresRepo.Delete",
+		}
+	} else if err != sql.ErrNoRows {
+		return errUtility.CustomError{
+			Code:          http.StatusInternalServerError,
+			Message:       err.Error(),
+			MessageToSend: "Failed delete role",
+			Function:      "RolePostgresRepo.Delete",
+		}
+	}
+
+	query := "DELETE FROM roles WHERE id = $1;"
+	res, err := db.ExecContext(ctx, query, roleID)
+	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "roles_parent_id_fkey") || strings.Contains(errStr, "violates foreign key constraint") {
+			return errUtility.CustomError{
+				Code:          http.StatusBadRequest,
+				Message:       errStr,
+				MessageToSend: "Cannot delete role because it has child roles",
+				Property:      "id",
+				Function:      "RolePostgresRepo.Delete",
+			}
+		}
+
+		return errUtility.CustomError{
+			Code:          http.StatusInternalServerError,
+			Message:       errStr,
+			MessageToSend: "Failed delete role",
+			Function:      "RolePostgresRepo.Delete",
+		}
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return errUtility.CustomError{
+			Code:          http.StatusInternalServerError,
+			Message:       err.Error(),
+			MessageToSend: "Failed delete role",
+			Function:      "RolePostgresRepo.Delete",
+		}
+	} else {
+		if rowsAffected == 0 {
+			return errUtility.CustomError{
+				Code:          http.StatusNotFound,
+				MessageToSend: "Role not found",
+				Function:      "RolePostgresRepo.Delete",
+				Property:      "id",
+			}
+		}
+	}
+	return errUtility.CustomError{}
+}
 func FactoryRoleRepo() RolePostgresRepo {
 	if roleRepo == (RolePostgresRepo{}) {
 		roleRepo = RolePostgresRepo{}

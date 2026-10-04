@@ -26,6 +26,7 @@ type roleServiceInterface interface {
 	CreateRoleSrvc(ctx context.Context, param models.CreateRoleRequest) errUtility.CustomError
 	UpdateRoleSrvc(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError
 	GetByIDSrvc(ctx context.Context, roleID uuid.UUID) (models.RoleResponse, errUtility.CustomError)
+	DeleteSrvc(ctx context.Context, roleID uuid.UUID) errUtility.CustomError
 }
 
 type roleController struct {
@@ -109,6 +110,64 @@ func (c roleController) GetByIDCtrl(w http.ResponseWriter, r *http.Request) {
 	utilities.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"message": "Role retrieved successfully",
 		"data":    data,
+	})
+
+}
+func (c roleController) DeleteCtrl(w http.ResponseWriter, r *http.Request) {
+	reqId := utilities.GetReqID(r.Context())
+	path := r.URL.Path
+	roleID := chi.URLParam(r, "roleID")
+	utilities.Log(reqId, utilities.DEBUG, path, "roleController.DeleteCtrl", map[string]string{"roleID": roleID}, "incoming request", nil)
+	if roleID == "" {
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors":  map[string]string{"roleID": "roleID path parameter is required"},
+		})
+		return
+	}
+	roleUUID, err := uuid.Parse(roleID)
+	if err != nil {
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors": map[string][]string{
+				"roleID": []string{"Invalid roleID"},
+			},
+		})
+		return
+	}
+	errObj := c.service.DeleteSrvc(r.Context(), roleUUID)
+	if errObj.Code > 0 {
+		errObj.Compile()
+		statusCode := int(errObj.Code)
+
+		logLevel := utilities.ERROR
+		if statusCode < 500 {
+			logLevel = utilities.WARN
+		}
+		utilities.Log(reqId, logLevel, path, "roleController.DeleteCtrl", map[string]string{"roleID": roleID}, "service execution failed", errObj)
+
+		if statusCode == 500 {
+			utilities.WriteJSON(w, statusCode, map[string]interface{}{
+				"message": "Failed to delete role",
+				"errors":  "Internal Server Error",
+			})
+			return
+		} else {
+			errKey := errObj.Property
+			if errKey == "" {
+				errKey = "error"
+			}
+			utilities.WriteJSON(w, statusCode, map[string]interface{}{
+				"message": "Failed to delete role",
+				"errors": map[string]string{
+					errKey: errObj.MessageToSend,
+				},
+			})
+			return
+		}
+	}
+	utilities.WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"message": "Role deleted successfully",
 	})
 
 }

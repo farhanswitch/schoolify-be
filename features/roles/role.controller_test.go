@@ -20,6 +20,7 @@ type mockRoleService struct {
 	CreateRoleSrvcFunc  func(ctx context.Context, param models.CreateRoleRequest) errUtility.CustomError
 	UpdateRoleSrvcFunc  func(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError
 	GetByIDSrvcFunc     func(ctx context.Context, roleID uuid.UUID) (models.RoleResponse, errUtility.CustomError)
+	DeleteSrvcFunc      func(ctx context.Context, roleID uuid.UUID) errUtility.CustomError
 }
 
 func (m *mockRoleService) GetAllRolesSrvc(ctx context.Context) ([]*models.RoleResponse, errUtility.CustomError) {
@@ -48,6 +49,13 @@ func (m *mockRoleService) GetByIDSrvc(ctx context.Context, roleID uuid.UUID) (mo
 		return m.GetByIDSrvcFunc(ctx, roleID)
 	}
 	return models.RoleResponse{}, errUtility.CustomError{}
+}
+
+func (m *mockRoleService) DeleteSrvc(ctx context.Context, roleID uuid.UUID) errUtility.CustomError {
+	if m.DeleteSrvcFunc != nil {
+		return m.DeleteSrvcFunc(ctx, roleID)
+	}
+	return errUtility.CustomError{}
 }
 
 func TestGetAllRolesCtrl(t *testing.T) {
@@ -521,5 +529,144 @@ func TestGetByIDCtrl(t *testing.T) {
 		}
 	})
 }
+
+func TestDeleteCtrl(t *testing.T) {
+	testUUID := uuid.New()
+
+	newRequestWithParam := func(method, target, paramKey, paramVal string) *http.Request {
+		req := httptest.NewRequest(method, target, nil)
+		rctx := chi.NewRouteContext()
+		if paramKey != "" {
+			rctx.URLParams.Add(paramKey, paramVal)
+		}
+		return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	}
+
+	t.Run("should return 400 when roleID is missing from path parameter", func(t *testing.T) {
+		ctrl := roleController{service: &mockRoleService{}}
+		req := newRequestWithParam(http.MethodDelete, "/api/role/", "", "")
+		w := httptest.NewRecorder()
+
+		ctrl.DeleteCtrl(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "roleID path parameter is required") {
+			t.Errorf("expected response to contain 'roleID path parameter is required', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 400 when roleID is not a valid UUID", func(t *testing.T) {
+		ctrl := roleController{service: &mockRoleService{}}
+		req := newRequestWithParam(http.MethodDelete, "/api/role/not-a-uuid", "roleID", "not-a-uuid")
+		w := httptest.NewRecorder()
+
+		ctrl.DeleteCtrl(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Invalid roleID") {
+			t.Errorf("expected response to contain 'Invalid roleID', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 400 when role has child roles and cannot be deleted", func(t *testing.T) {
+		mockSrv := &mockRoleService{
+			DeleteSrvcFunc: func(ctx context.Context, roleID uuid.UUID) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusBadRequest,
+					MessageToSend: "Cannot delete role because it has child roles",
+					Property:      "id",
+				}
+			},
+		}
+		ctrl := roleController{service: mockSrv}
+		req := newRequestWithParam(http.MethodDelete, "/api/role/"+testUUID.String(), "roleID", testUUID.String())
+		w := httptest.NewRecorder()
+
+		ctrl.DeleteCtrl(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Cannot delete role because it has child roles") {
+			t.Errorf("expected response to contain 'Cannot delete role because it has child roles', got %s", w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), `"id"`) {
+			t.Errorf("expected response errors to specify 'id' field, got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 404 when role to delete is not found", func(t *testing.T) {
+		mockSrv := &mockRoleService{
+			DeleteSrvcFunc: func(ctx context.Context, roleID uuid.UUID) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusNotFound,
+					MessageToSend: "Role not found",
+					Property:      "id",
+				}
+			},
+		}
+		ctrl := roleController{service: mockSrv}
+		req := newRequestWithParam(http.MethodDelete, "/api/role/"+testUUID.String(), "roleID", testUUID.String())
+		w := httptest.NewRecorder()
+
+		ctrl.DeleteCtrl(w, req)
+
+		if w.Code != http.StatusNotFound {
+			t.Errorf("expected status 404, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Role not found") {
+			t.Errorf("expected response to contain 'Role not found', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 500 when service fails unexpectedly", func(t *testing.T) {
+		mockSrv := &mockRoleService{
+			DeleteSrvcFunc: func(ctx context.Context, roleID uuid.UUID) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusInternalServerError,
+					Message:       "internal database failure",
+					MessageToSend: "Failed delete role",
+				}
+			},
+		}
+		ctrl := roleController{service: mockSrv}
+		req := newRequestWithParam(http.MethodDelete, "/api/role/"+testUUID.String(), "roleID", testUUID.String())
+		w := httptest.NewRecorder()
+
+		ctrl.DeleteCtrl(w, req)
+
+		if w.Code != http.StatusInternalServerError {
+			t.Errorf("expected status 500, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Internal Server Error") {
+			t.Errorf("expected response to contain 'Internal Server Error', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 200 on successful role deletion", func(t *testing.T) {
+		mockSrv := &mockRoleService{
+			DeleteSrvcFunc: func(ctx context.Context, roleID uuid.UUID) errUtility.CustomError {
+				return errUtility.CustomError{}
+			},
+		}
+		ctrl := roleController{service: mockSrv}
+		req := newRequestWithParam(http.MethodDelete, "/api/role/"+testUUID.String(), "roleID", testUUID.String())
+		w := httptest.NewRecorder()
+
+		ctrl.DeleteCtrl(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("expected status 200, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Role deleted successfully") {
+			t.Errorf("expected response to contain 'Role deleted successfully', got %s", w.Body.String())
+		}
+	})
+}
+
 
 

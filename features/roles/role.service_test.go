@@ -15,6 +15,7 @@ type mockRoleRepo struct {
 	CreateFunc  func(ctx context.Context, param models.CreateRoleRequest) errUtility.CustomError
 	UpdateFunc  func(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError
 	GetByIDFunc func(ctx context.Context, roleID uuid.UUID) (models.RoleResponse, errUtility.CustomError)
+	DeleteFunc  func(ctx context.Context, roleID uuid.UUID) errUtility.CustomError
 }
 
 func (m *mockRoleRepo) GetAll(ctx context.Context) ([]models.RoleResponse, errUtility.CustomError) {
@@ -43,6 +44,13 @@ func (m *mockRoleRepo) GetByID(ctx context.Context, roleID uuid.UUID) (models.Ro
 		return m.GetByIDFunc(ctx, roleID)
 	}
 	return models.RoleResponse{}, errUtility.CustomError{}
+}
+
+func (m *mockRoleRepo) Delete(ctx context.Context, roleID uuid.UUID) errUtility.CustomError {
+	if m.DeleteFunc != nil {
+		return m.DeleteFunc(ctx, roleID)
+	}
+	return errUtility.CustomError{}
 }
 
 func TestBuildRoleTree(t *testing.T) {
@@ -497,5 +505,99 @@ func TestGetByIDSrvc(t *testing.T) {
 		}
 	})
 }
+
+func TestDeleteSrvc(t *testing.T) {
+	ctx := context.Background()
+	roleID := uuid.New()
+
+	t.Run("should return error when repository fails", func(t *testing.T) {
+		mockRepo := &mockRoleRepo{
+			DeleteFunc: func(ctx context.Context, id uuid.UUID) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusInternalServerError,
+					Message:       "database error",
+					MessageToSend: "Failed delete role",
+					Function:      "RolePostgresRepo.Delete",
+				}
+			},
+		}
+
+		srv := roleService{repo: mockRepo}
+		errObj := srv.DeleteSrvc(ctx, roleID)
+
+		if errObj.Code != http.StatusInternalServerError {
+			t.Errorf("expected error code %d, got %d", http.StatusInternalServerError, errObj.Code)
+		}
+		if errObj.MessageToSend != "Failed delete role" {
+			t.Errorf("expected message 'Failed delete role', got '%s'", errObj.MessageToSend)
+		}
+	})
+
+	t.Run("should return error when role has child roles", func(t *testing.T) {
+		mockRepo := &mockRoleRepo{
+			DeleteFunc: func(ctx context.Context, id uuid.UUID) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusBadRequest,
+					Message:       "cannot delete role that has child roles",
+					MessageToSend: "Cannot delete role because it has child roles",
+					Property:      "id",
+					Function:      "RolePostgresRepo.Delete",
+				}
+			},
+		}
+
+		srv := roleService{repo: mockRepo}
+		errObj := srv.DeleteSrvc(ctx, roleID)
+
+		if errObj.Code != http.StatusBadRequest {
+			t.Errorf("expected error code %d, got %d", http.StatusBadRequest, errObj.Code)
+		}
+		if errObj.MessageToSend != "Cannot delete role because it has child roles" {
+			t.Errorf("expected message 'Cannot delete role because it has child roles', got '%s'", errObj.MessageToSend)
+		}
+		if errObj.Property != "id" {
+			t.Errorf("expected property 'id', got '%s'", errObj.Property)
+		}
+	})
+
+	t.Run("should return error when role to delete is not found", func(t *testing.T) {
+		mockRepo := &mockRoleRepo{
+			DeleteFunc: func(ctx context.Context, id uuid.UUID) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusNotFound,
+					MessageToSend: "Role not found",
+					Property:      "id",
+					Function:      "RolePostgresRepo.Delete",
+				}
+			},
+		}
+
+		srv := roleService{repo: mockRepo}
+		errObj := srv.DeleteSrvc(ctx, roleID)
+
+		if errObj.Code != http.StatusNotFound {
+			t.Errorf("expected error code %d, got %d", http.StatusNotFound, errObj.Code)
+		}
+		if errObj.MessageToSend != "Role not found" {
+			t.Errorf("expected message 'Role not found', got '%s'", errObj.MessageToSend)
+		}
+	})
+
+	t.Run("should return success when repository succeeds", func(t *testing.T) {
+		mockRepo := &mockRoleRepo{
+			DeleteFunc: func(ctx context.Context, id uuid.UUID) errUtility.CustomError {
+				return errUtility.CustomError{}
+			},
+		}
+
+		srv := roleService{repo: mockRepo}
+		errObj := srv.DeleteSrvc(ctx, roleID)
+
+		if errObj.Code != 0 {
+			t.Fatalf("expected error code 0, got %d", errObj.Code)
+		}
+	})
+}
+
 
 

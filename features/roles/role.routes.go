@@ -15,5 +15,6 @@ func InitModule(router *chi.Mux) {
 	router.With(utilities.AuthMiddleware).Get("/api/role/{roleID}", controller.GetByIDCtrl)
 	router.With(utilities.AuthMiddleware).Post("/api/role", controller.createCtrl)
 	router.With(utilities.AuthMiddleware).Put("/api/role", controller.updateCtrl)
+	router.With(utilities.AuthMiddleware).Delete("/api/role/{roleID}", controller.DeleteCtrl)
 
 }
