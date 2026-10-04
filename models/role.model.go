@@ -31,13 +31,6 @@ type RoleResponse struct {
 	ParentID    *uuid.UUID      `json:"parentID"`
 }
 
-type MenuResponse struct {
-	Id          uuid.UUID  `json:"id"`
-	Name        string     `json:"name"`
-	Description string     `json:"description"`
-	ParentId    *uuid.UUID `json:"parentId"`
-}
-
 type ValidRoleAndMenuResponse struct {
 	Roles []RoleResponse `json:"roles"`
 	Menus []MenuResponse `json:"menus"`
