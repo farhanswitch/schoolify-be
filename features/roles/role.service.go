@@ -16,6 +16,7 @@ type rolePostgresRepoInterface interface {
 	GetByID(ctx context.Context, roleID uuid.UUID) (models.RoleResponse, errUtility.CustomError)
 	Delete(ctx context.Context, roleID uuid.UUID) errUtility.CustomError
 	AssignMenu(ctx context.Context, roleID uuid.UUID, param models.AssignMenuRequest) errUtility.CustomError
+	GetAssignedMenus(ctx context.Context, roleID uuid.UUID) ([]models.RoleMenuResponse, errUtility.CustomError)
 }
 
 type roleService struct {
@@ -86,6 +87,46 @@ func (s roleService) DeleteSrvc(ctx context.Context, roleID uuid.UUID) errUtilit
 }
 func (s roleService) AssignMenuSrvc(ctx context.Context, roleID uuid.UUID, param models.AssignMenuRequest) errUtility.CustomError {
 	return s.repo.AssignMenu(ctx, roleID, param)
+}
+
+// buildRoleMenuTree converts a flat slice of role menus into a hierarchical parent-child tree.
+func buildRoleMenuTree(flatMenus []models.RoleMenuResponse) []*models.RoleMenuResponse {
+	nodes := make(map[string]*models.RoleMenuResponse, len(flatMenus))
+	for i := range flatMenus {
+		nodes[flatMenus[i].Id] = &models.RoleMenuResponse{
+			Id:          flatMenus[i].Id,
+			ParentId:    flatMenus[i].ParentId,
+			Name:        flatMenus[i].Name,
+			Description: flatMenus[i].Description,
+			CreatedAt:   flatMenus[i].CreatedAt,
+			UpdatedAt:   flatMenus[i].UpdatedAt,
+			Status:      flatMenus[i].Status,
+			Children:    []*models.RoleMenuResponse{},
+		}
+	}
+
+	var rootNodes []*models.RoleMenuResponse
+	for _, node := range nodes {
+		if node.ParentId == nil || *node.ParentId == "" {
+			rootNodes = append(rootNodes, node)
+		} else {
+			if parent, exists := nodes[*node.ParentId]; exists {
+				parent.Children = append(parent.Children, node)
+			} else {
+				// Parent not found in flat list, fallback to treating as root
+				rootNodes = append(rootNodes, node)
+			}
+		}
+	}
+	return rootNodes
+}
+
+func (s roleService) GetAssignedMenusSrvc(ctx context.Context, roleID uuid.UUID) ([]*models.RoleMenuResponse, errUtility.CustomError) {
+	flatMenus, customErr := s.repo.GetAssignedMenus(ctx, roleID)
+	if customErr.Code > 0 {
+		return []*models.RoleMenuResponse{}, customErr
+	}
+	return buildRoleMenuTree(flatMenus), errUtility.CustomError{}
 }
 
 func factoryRoleService(repo rolePostgresRepoInterface) roleService {

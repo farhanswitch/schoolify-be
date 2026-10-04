@@ -28,6 +28,7 @@ type roleServiceInterface interface {
 	GetByIDSrvc(ctx context.Context, roleID uuid.UUID) (models.RoleResponse, errUtility.CustomError)
 	DeleteSrvc(ctx context.Context, roleID uuid.UUID) errUtility.CustomError
 	AssignMenuSrvc(ctx context.Context, roleID uuid.UUID, param models.AssignMenuRequest) errUtility.CustomError
+	GetAssignedMenusSrvc(ctx context.Context, roleID uuid.UUID) ([]*models.RoleMenuResponse, errUtility.CustomError)
 }
 
 type roleController struct {
@@ -373,6 +374,72 @@ func (c roleController) assignMenuCtrl(w http.ResponseWriter, r *http.Request) {
 	utilities.Log(reqId, utilities.DEBUG, path, "roleController.assignMenuCtrl", nil, "success", nil)
 	utilities.WriteJSON(w, http.StatusCreated, map[string]string{
 		"message": "List Menu assigned successfully",
+	})
+}
+
+func (c roleController) listAssignedMenuCtrl(w http.ResponseWriter, r *http.Request) {
+	reqId := utilities.GetReqID(r.Context())
+	path := r.URL.Path
+	roleID := chi.URLParam(r, "roleID")
+	utilities.Log(reqId, utilities.DEBUG, path, "roleController.listAssignedMenuCtrl", map[string]string{"roleID": roleID}, "incoming request", nil)
+
+	if roleID == "" {
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors":  map[string]string{"roleID": "roleID path parameter is required"},
+		})
+		return
+	}
+	roleUUID, err := uuid.Parse(roleID)
+	if err != nil {
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors": map[string][]string{
+				"roleID": []string{"Invalid roleID"},
+			},
+		})
+		return
+	}
+
+	data, errObj := c.service.GetAssignedMenusSrvc(r.Context(), roleUUID)
+	if errObj.Code > 0 {
+		errObj.Compile()
+		statusCode := int(errObj.Code)
+
+		logLevel := utilities.ERROR
+		if statusCode < 500 {
+			logLevel = utilities.WARN
+		}
+		utilities.Log(reqId, logLevel, path, "roleController.listAssignedMenuCtrl", map[string]string{"roleID": roleID}, "service execution failed", errObj)
+
+		if statusCode == 500 {
+			utilities.WriteJSON(w, statusCode, map[string]interface{}{
+				"message": "Failed to get assigned menus",
+				"errors":  "Internal Server Error",
+			})
+			return
+		} else {
+			errKey := errObj.Property
+			if errKey == "" {
+				errKey = "error"
+			}
+			utilities.WriteJSON(w, statusCode, map[string]interface{}{
+				"message": "Failed to get assigned menus",
+				"errors": map[string]string{
+					errKey: errObj.MessageToSend,
+				},
+			})
+			return
+		}
+	}
+
+	if data == nil {
+		data = []*models.RoleMenuResponse{}
+	}
+
+	utilities.WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"message": "Assigned menus retrieved successfully",
+		"data":    data,
 	})
 }
 

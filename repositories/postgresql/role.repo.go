@@ -399,9 +399,112 @@ func (r RolePostgresRepo) AssignMenu(ctx context.Context, roleID uuid.UUID, para
 	}
 	return errUtility.CustomError{}
 }
+
+func (r RolePostgresRepo) GetAssignedMenus(ctx context.Context, roleID uuid.UUID) ([]models.RoleMenuResponse, errUtility.CustomError) {
+	db := connections.DbPostgres()
+
+	// 1. Check if role exists
+	var existingRoleID uuid.UUID
+	err := db.QueryRowContext(ctx, "SELECT id FROM roles WHERE id = $1;", roleID).Scan(&existingRoleID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, errUtility.CustomError{
+				Code:          http.StatusNotFound,
+				Message:       "role not found",
+				MessageToSend: "Role not found",
+				Property:      "roleID",
+				Function:      "RolePostgresRepo.GetAssignedMenus",
+			}
+		}
+		return nil, errUtility.CustomError{
+			Code:          http.StatusInternalServerError,
+			Message:       err.Error(),
+			MessageToSend: "Failed to get assigned menus",
+			Function:      "RolePostgresRepo.GetAssignedMenus",
+		}
+	}
+
+	// 2. Query all menus with status flag
+	query := `
+		SELECT 
+			m.id, 
+			m.parent_id, 
+			m.name, 
+			m.description, 
+			m.created_at, 
+			m.updated_at,
+			CASE WHEN rm.role_id IS NOT NULL THEN 1 ELSE 0 END AS status
+		FROM menus m
+		LEFT JOIN role_menu rm ON rm.menu_id = m.id AND rm.role_id = $1
+		ORDER BY m.created_at ASC;
+	`
+	rows, err := db.QueryContext(ctx, query, roleID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return []models.RoleMenuResponse{}, errUtility.CustomError{}
+		}
+		return nil, errUtility.CustomError{
+			Code:          http.StatusInternalServerError,
+			Message:       err.Error(),
+			MessageToSend: "Failed to get assigned menus",
+			Function:      "RolePostgresRepo.GetAssignedMenus",
+		}
+	}
+	defer rows.Close()
+
+	var list []models.RoleMenuResponse
+	for rows.Next() {
+		var data models.RoleMenuResponse
+		var parentId, description, createdAt, updatedAt sql.NullString
+
+		err = rows.Scan(&data.Id, &parentId, &data.Name, &description, &createdAt, &updatedAt, &data.Status)
+		if err != nil {
+			return nil, errUtility.CustomError{
+				Code:          http.StatusInternalServerError,
+				Message:       err.Error(),
+				MessageToSend: "Failed to get assigned menus",
+				Function:      "RolePostgresRepo.GetAssignedMenus",
+			}
+		}
+
+		if parentId.Valid && parentId.String != "" {
+			pId := parentId.String
+			data.ParentId = &pId
+		}
+		if description.Valid {
+			data.Description = description.String
+		}
+		if createdAt.Valid {
+			data.CreatedAt = createdAt.String
+		}
+		if updatedAt.Valid {
+			data.UpdatedAt = updatedAt.String
+		}
+		data.Children = []*models.RoleMenuResponse{}
+
+		list = append(list, data)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, errUtility.CustomError{
+			Code:          http.StatusInternalServerError,
+			Message:       err.Error(),
+			MessageToSend: "Failed to get assigned menus",
+			Function:      "RolePostgresRepo.GetAssignedMenus",
+		}
+	}
+
+	if list == nil {
+		list = []models.RoleMenuResponse{}
+	}
+
+	return list, errUtility.CustomError{}
+}
+
 func FactoryRoleRepo() RolePostgresRepo {
 	if roleRepo == (RolePostgresRepo{}) {
 		roleRepo = RolePostgresRepo{}
 	}
 	return roleRepo
 }
+

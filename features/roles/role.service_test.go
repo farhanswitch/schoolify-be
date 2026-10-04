@@ -15,8 +15,9 @@ type mockRoleRepo struct {
 	CreateFunc  func(ctx context.Context, param models.CreateRoleRequest) errUtility.CustomError
 	UpdateFunc  func(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError
 	GetByIDFunc func(ctx context.Context, roleID uuid.UUID) (models.RoleResponse, errUtility.CustomError)
-	DeleteFunc     func(ctx context.Context, roleID uuid.UUID) errUtility.CustomError
-	AssignMenuFunc func(ctx context.Context, roleID uuid.UUID, param models.AssignMenuRequest) errUtility.CustomError
+	DeleteFunc          func(ctx context.Context, roleID uuid.UUID) errUtility.CustomError
+	AssignMenuFunc      func(ctx context.Context, roleID uuid.UUID, param models.AssignMenuRequest) errUtility.CustomError
+	GetAssignedMenusFunc func(ctx context.Context, roleID uuid.UUID) ([]models.RoleMenuResponse, errUtility.CustomError)
 }
 
 func (m *mockRoleRepo) GetAll(ctx context.Context) ([]models.RoleResponse, errUtility.CustomError) {
@@ -60,6 +61,14 @@ func (m *mockRoleRepo) AssignMenu(ctx context.Context, roleID uuid.UUID, param m
 	}
 	return errUtility.CustomError{}
 }
+
+func (m *mockRoleRepo) GetAssignedMenus(ctx context.Context, roleID uuid.UUID) ([]models.RoleMenuResponse, errUtility.CustomError) {
+	if m.GetAssignedMenusFunc != nil {
+		return m.GetAssignedMenusFunc(ctx, roleID)
+	}
+	return []models.RoleMenuResponse{}, errUtility.CustomError{}
+}
+
 
 
 func TestBuildRoleTree(t *testing.T) {
@@ -713,6 +722,139 @@ func TestAssignMenuSrvc(t *testing.T) {
 		}
 	})
 }
+
+func TestBuildRoleMenuTree(t *testing.T) {
+	t.Run("should return empty slice when input is empty", func(t *testing.T) {
+		result := buildRoleMenuTree([]models.RoleMenuResponse{})
+		if len(result) != 0 {
+			t.Errorf("expected empty slice, got length %d", len(result))
+		}
+	})
+
+	t.Run("should correctly build parent-child hierarchy with status", func(t *testing.T) {
+		rootID := "root-1"
+		childID := "child-1"
+		flatMenus := []models.RoleMenuResponse{
+			{
+				Id:       rootID,
+				Name:     "Dashboard",
+				ParentId: nil,
+				Status:   1,
+			},
+			{
+				Id:       childID,
+				Name:     "Analytics",
+				ParentId: &rootID,
+				Status:   0,
+			},
+		}
+
+		tree := buildRoleMenuTree(flatMenus)
+		if len(tree) != 1 {
+			t.Fatalf("expected 1 root node, got %d", len(tree))
+		}
+		if tree[0].Id != rootID {
+			t.Errorf("expected root ID %s, got %s", rootID, tree[0].Id)
+		}
+		if tree[0].Status != 1 {
+			t.Errorf("expected root status 1, got %d", tree[0].Status)
+		}
+		if len(tree[0].Children) != 1 {
+			t.Fatalf("expected 1 child, got %d", len(tree[0].Children))
+		}
+		if tree[0].Children[0].Id != childID {
+			t.Errorf("expected child ID %s, got %s", childID, tree[0].Children[0].Id)
+		}
+		if tree[0].Children[0].Status != 0 {
+			t.Errorf("expected child status 0, got %d", tree[0].Children[0].Status)
+		}
+	})
+}
+
+func TestGetAssignedMenusSrvc(t *testing.T) {
+	ctx := context.Background()
+	roleID := uuid.New()
+
+	t.Run("should return error when repository fails", func(t *testing.T) {
+		mockRepo := &mockRoleRepo{
+			GetAssignedMenusFunc: func(ctx context.Context, rID uuid.UUID) ([]models.RoleMenuResponse, errUtility.CustomError) {
+				return nil, errUtility.CustomError{
+					Code:          http.StatusInternalServerError,
+					Message:       "internal database failure",
+					MessageToSend: "Failed to get assigned menus",
+					Function:      "RolePostgresRepo.GetAssignedMenus",
+				}
+			},
+		}
+
+		srv := roleService{repo: mockRepo}
+		data, errObj := srv.GetAssignedMenusSrvc(ctx, roleID)
+
+		if errObj.Code != http.StatusInternalServerError {
+			t.Errorf("expected error code %d, got %d", http.StatusInternalServerError, errObj.Code)
+		}
+		if len(data) != 0 {
+			t.Errorf("expected empty data on error, got %d", len(data))
+		}
+	})
+
+	t.Run("should return 404 when role not found", func(t *testing.T) {
+		mockRepo := &mockRoleRepo{
+			GetAssignedMenusFunc: func(ctx context.Context, rID uuid.UUID) ([]models.RoleMenuResponse, errUtility.CustomError) {
+				return nil, errUtility.CustomError{
+					Code:          http.StatusNotFound,
+					MessageToSend: "Role not found",
+					Property:      "roleID",
+					Function:      "RolePostgresRepo.GetAssignedMenus",
+				}
+			},
+		}
+
+		srv := roleService{repo: mockRepo}
+		_, errObj := srv.GetAssignedMenusSrvc(ctx, roleID)
+
+		if errObj.Code != http.StatusNotFound {
+			t.Errorf("expected error code %d, got %d", http.StatusNotFound, errObj.Code)
+		}
+		if errObj.MessageToSend != "Role not found" {
+			t.Errorf("expected message 'Role not found', got '%s'", errObj.MessageToSend)
+		}
+	})
+
+	t.Run("should return hierarchical menu tree with status on success", func(t *testing.T) {
+		rootID := "menu-1"
+		mockRepo := &mockRoleRepo{
+			GetAssignedMenusFunc: func(ctx context.Context, rID uuid.UUID) ([]models.RoleMenuResponse, errUtility.CustomError) {
+				return []models.RoleMenuResponse{
+					{
+						Id:          rootID,
+						Name:        "Dashboard",
+						Description: "Main Dashboard",
+						ParentId:    nil,
+						Status:      1,
+					},
+				}, errUtility.CustomError{}
+			},
+		}
+
+		srv := roleService{repo: mockRepo}
+		data, errObj := srv.GetAssignedMenusSrvc(ctx, roleID)
+
+		if errObj.Code != 0 {
+			t.Fatalf("expected error code 0, got %d", errObj.Code)
+		}
+		if len(data) != 1 {
+			t.Fatalf("expected 1 root menu, got %d", len(data))
+		}
+		if data[0].Id != rootID {
+			t.Errorf("expected menu ID %s, got %s", rootID, data[0].Id)
+		}
+		if data[0].Status != 1 {
+			t.Errorf("expected menu status 1, got %d", data[0].Status)
+		}
+	})
+}
+
 
 
 

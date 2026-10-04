@@ -35,3 +35,15 @@ type ValidRoleAndMenuResponse struct {
 	Roles []RoleResponse `json:"roles"`
 	Menus []MenuResponse `json:"menus"`
 }
+
+type RoleMenuResponse struct {
+	Id          string              `json:"id"`
+	ParentId    *string             `json:"parentId"`
+	Name        string              `json:"name"`
+	Description string              `json:"description"`
+	CreatedAt   string              `json:"createdAt"`
+	UpdatedAt   string              `json:"updatedAt"`
+	Status      int                 `json:"status"`
+	Children    []*RoleMenuResponse `json:"children"`
+}
+

@@ -21,7 +21,8 @@ type mockRoleService struct {
 	UpdateRoleSrvcFunc  func(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError
 	GetByIDSrvcFunc     func(ctx context.Context, roleID uuid.UUID) (models.RoleResponse, errUtility.CustomError)
 	DeleteSrvcFunc      func(ctx context.Context, roleID uuid.UUID) errUtility.CustomError
-	AssignMenuSrvcFunc  func(ctx context.Context, roleID uuid.UUID, param models.AssignMenuRequest) errUtility.CustomError
+	AssignMenuSrvcFunc   func(ctx context.Context, roleID uuid.UUID, param models.AssignMenuRequest) errUtility.CustomError
+	GetAssignedMenusSrvcFunc func(ctx context.Context, roleID uuid.UUID) ([]*models.RoleMenuResponse, errUtility.CustomError)
 }
 
 func (m *mockRoleService) GetAllRolesSrvc(ctx context.Context) ([]*models.RoleResponse, errUtility.CustomError) {
@@ -65,6 +66,14 @@ func (m *mockRoleService) AssignMenuSrvc(ctx context.Context, roleID uuid.UUID, 
 	}
 	return errUtility.CustomError{}
 }
+
+func (m *mockRoleService) GetAssignedMenusSrvc(ctx context.Context, roleID uuid.UUID) ([]*models.RoleMenuResponse, errUtility.CustomError) {
+	if m.GetAssignedMenusSrvcFunc != nil {
+		return m.GetAssignedMenusSrvcFunc(ctx, roleID)
+	}
+	return []*models.RoleMenuResponse{}, errUtility.CustomError{}
+}
+
 
 
 func TestGetAllRolesCtrl(t *testing.T) {
@@ -853,6 +862,143 @@ func TestAssignMenuCtrl(t *testing.T) {
 		}
 	})
 }
+
+func TestListAssignedMenuCtrl(t *testing.T) {
+	testRoleUUID := uuid.New()
+
+	newRequestWithParam := func(method, target, paramKey, paramVal string) *http.Request {
+		req := httptest.NewRequest(method, target, nil)
+		rctx := chi.NewRouteContext()
+		if paramKey != "" {
+			rctx.URLParams.Add(paramKey, paramVal)
+		}
+		return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	}
+
+	t.Run("should return 400 when roleID is missing from path parameter", func(t *testing.T) {
+		ctrl := roleController{service: &mockRoleService{}}
+		req := newRequestWithParam(http.MethodGet, "/api/role/list-assigned-menu/", "", "")
+		w := httptest.NewRecorder()
+
+		ctrl.listAssignedMenuCtrl(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "roleID path parameter is required") {
+			t.Errorf("expected response to contain 'roleID path parameter is required', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 400 when roleID is not a valid UUID", func(t *testing.T) {
+		ctrl := roleController{service: &mockRoleService{}}
+		req := newRequestWithParam(http.MethodGet, "/api/role/list-assigned-menu/not-a-uuid", "roleID", "not-a-uuid")
+		w := httptest.NewRecorder()
+
+		ctrl.listAssignedMenuCtrl(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Invalid roleID") {
+			t.Errorf("expected response to contain 'Invalid roleID', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 404 when role does not exist in database", func(t *testing.T) {
+		mockSrv := &mockRoleService{
+			GetAssignedMenusSrvcFunc: func(ctx context.Context, roleID uuid.UUID) ([]*models.RoleMenuResponse, errUtility.CustomError) {
+				return nil, errUtility.CustomError{
+					Code:          http.StatusNotFound,
+					MessageToSend: "Role not found",
+					Property:      "roleID",
+				}
+			},
+		}
+		ctrl := roleController{service: mockSrv}
+		req := newRequestWithParam(http.MethodGet, "/api/role/list-assigned-menu/"+testRoleUUID.String(), "roleID", testRoleUUID.String())
+		w := httptest.NewRecorder()
+
+		ctrl.listAssignedMenuCtrl(w, req)
+
+		if w.Code != http.StatusNotFound {
+			t.Errorf("expected status 404, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Role not found") {
+			t.Errorf("expected response to contain 'Role not found', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 500 when service fails unexpectedly", func(t *testing.T) {
+		mockSrv := &mockRoleService{
+			GetAssignedMenusSrvcFunc: func(ctx context.Context, roleID uuid.UUID) ([]*models.RoleMenuResponse, errUtility.CustomError) {
+				return nil, errUtility.CustomError{
+					Code:          http.StatusInternalServerError,
+					Message:       "internal database failure",
+					MessageToSend: "Failed to get assigned menus",
+				}
+			},
+		}
+		ctrl := roleController{service: mockSrv}
+		req := newRequestWithParam(http.MethodGet, "/api/role/list-assigned-menu/"+testRoleUUID.String(), "roleID", testRoleUUID.String())
+		w := httptest.NewRecorder()
+
+		ctrl.listAssignedMenuCtrl(w, req)
+
+		if w.Code != http.StatusInternalServerError {
+			t.Errorf("expected status 500, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Internal Server Error") {
+			t.Errorf("expected response to contain 'Internal Server Error', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 200 with assigned menus list on success", func(t *testing.T) {
+		expectedMenus := []*models.RoleMenuResponse{
+			{
+				Id:          "menu-1",
+				Name:        "Dashboard",
+				Description: "Dashboard menu",
+				Status:      1,
+				Children:    []*models.RoleMenuResponse{},
+			},
+			{
+				Id:          "menu-2",
+				Name:        "Settings",
+				Description: "Settings menu",
+				Status:      0,
+				Children:    []*models.RoleMenuResponse{},
+			},
+		}
+		mockSrv := &mockRoleService{
+			GetAssignedMenusSrvcFunc: func(ctx context.Context, roleID uuid.UUID) ([]*models.RoleMenuResponse, errUtility.CustomError) {
+				return expectedMenus, errUtility.CustomError{}
+			},
+		}
+		ctrl := roleController{service: mockSrv}
+		req := newRequestWithParam(http.MethodGet, "/api/role/list-assigned-menu/"+testRoleUUID.String(), "roleID", testRoleUUID.String())
+		w := httptest.NewRecorder()
+
+		ctrl.listAssignedMenuCtrl(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("expected status 200, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Assigned menus retrieved successfully") {
+			t.Errorf("expected response to contain 'Assigned menus retrieved successfully', got %s", w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "Dashboard") {
+			t.Errorf("expected response to contain 'Dashboard', got %s", w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), `"status":1`) {
+			t.Errorf("expected response to contain '\"status\":1', got %s", w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), `"status":0`) {
+			t.Errorf("expected response to contain '\"status\":0', got %s", w.Body.String())
+		}
+	})
+}
+
 
 
 

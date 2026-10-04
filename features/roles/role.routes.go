@@ -17,5 +17,7 @@ func InitModule(router *chi.Mux) {
 	router.With(utilities.AuthMiddleware).Put("/api/role", controller.updateCtrl)
 	router.With(utilities.AuthMiddleware).Delete("/api/role/{roleID}", controller.DeleteCtrl)
 	router.With(utilities.AuthMiddleware).Put("/api/role/assign-menu/{roleID}", controller.assignMenuCtrl)
+	router.With(utilities.AuthMiddleware).Get("/api/role/list-assigned-menu/{roleID}", controller.listAssignedMenuCtrl)
 
 }
+
