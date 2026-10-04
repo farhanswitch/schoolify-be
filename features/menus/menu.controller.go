@@ -46,7 +46,7 @@ func (c menuController) createCtrl(w http.ResponseWriter, r *http.Request) {
 	if err := validate.Struct(reqBody); err != nil {
 		errMap := errUtility.ParseError(err)
 		utilities.Log(reqId, utilities.WARN, path, "menuController.createCtrl", reqBody, "validation failed", errMap)
-		utilities.WriteJSON(w, http.StatusUnprocessableEntity, map[string]interface{}{
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"message": "Validation failed",
 			"errors":  errMap,
 		})
