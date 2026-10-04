@@ -18,7 +18,7 @@ type UpdateRoleRequest struct {
 }
 
 type AssignMenuRequest struct {
-	MenuIds uuid.UUIDs `json:"menuIds" validate:"required,dive,required"`
+	MenuIds uuid.UUIDs `json:"listID" validate:"required,dive,required"`
 }
 
 type RoleResponse struct {

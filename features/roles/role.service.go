@@ -15,6 +15,7 @@ type rolePostgresRepoInterface interface {
 	Update(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError
 	GetByID(ctx context.Context, roleID uuid.UUID) (models.RoleResponse, errUtility.CustomError)
 	Delete(ctx context.Context, roleID uuid.UUID) errUtility.CustomError
+	AssignMenu(ctx context.Context, roleID uuid.UUID, param models.AssignMenuRequest) errUtility.CustomError
 }
 
 type roleService struct {
@@ -82,6 +83,9 @@ func (s roleService) GetByIDSrvc(ctx context.Context, roleID uuid.UUID) (models.
 }
 func (s roleService) DeleteSrvc(ctx context.Context, roleID uuid.UUID) errUtility.CustomError {
 	return s.repo.Delete(ctx, roleID)
+}
+func (s roleService) AssignMenuSrvc(ctx context.Context, roleID uuid.UUID, param models.AssignMenuRequest) errUtility.CustomError {
+	return s.repo.AssignMenu(ctx, roleID, param)
 }
 
 func factoryRoleService(repo rolePostgresRepoInterface) roleService {

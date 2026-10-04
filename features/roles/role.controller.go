@@ -27,6 +27,7 @@ type roleServiceInterface interface {
 	UpdateRoleSrvc(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError
 	GetByIDSrvc(ctx context.Context, roleID uuid.UUID) (models.RoleResponse, errUtility.CustomError)
 	DeleteSrvc(ctx context.Context, roleID uuid.UUID) errUtility.CustomError
+	AssignMenuSrvc(ctx context.Context, roleID uuid.UUID, param models.AssignMenuRequest) errUtility.CustomError
 }
 
 type roleController struct {
@@ -293,6 +294,85 @@ func (c roleController) updateCtrl(w http.ResponseWriter, r *http.Request) {
 	utilities.Log(reqId, utilities.DEBUG, path, "roleController.updateCtrl", nil, "success", nil)
 	utilities.WriteJSON(w, http.StatusCreated, map[string]string{
 		"message": "Role updated successfully",
+	})
+}
+func (c roleController) assignMenuCtrl(w http.ResponseWriter, r *http.Request) {
+	reqId := utilities.GetReqID(r.Context())
+	path := r.URL.Path
+	roleID := chi.URLParam(r, "roleID")
+	utilities.Log(reqId, utilities.DEBUG, path, "roleController.assignMenuCtrl", map[string]string{"roleID": roleID}, "incoming request", nil)
+
+	if roleID == "" {
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors":  map[string]string{"roleID": "roleID path parameter is required"},
+		})
+		return
+	}
+	roleUUID, err := uuid.Parse(roleID)
+	if err != nil {
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors": map[string][]string{
+				"roleID": []string{"Invalid roleID"},
+			},
+		})
+		return
+	}
+
+	var reqBody models.AssignMenuRequest
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		utilities.Log(reqId, utilities.ERROR, path, "roleController.assignMenuCtrl", nil, "json decode failed", err)
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors": map[string][]string{
+				"data": []string{"Invalid data"},
+			},
+		})
+		return
+	}
+	if err := validate.Struct(reqBody); err != nil {
+		errMap := errUtility.ParseError(err)
+		utilities.Log(reqId, utilities.WARN, path, "roleController.assignMenuCtrl", reqBody, "validation failed", errMap)
+		utilities.WriteJSON(w, http.StatusUnprocessableEntity, map[string]interface{}{
+			"message": "Validation failed",
+			"errors":  errMap,
+		})
+		return
+	}
+	if errObj := c.service.AssignMenuSrvc(r.Context(), roleUUID, reqBody); errObj.Code > 0 {
+		errObj.Compile()
+		statusCode := int(errObj.Code)
+
+		logLevel := utilities.ERROR
+		if statusCode < 500 {
+			logLevel = utilities.WARN
+		}
+		utilities.Log(reqId, logLevel, path, "roleController.assignMenuCtrl", reqBody, "service execution failed", errObj)
+
+		if statusCode == 500 {
+			utilities.WriteJSON(w, statusCode, map[string]interface{}{
+				"message": "Failed to assign menu",
+				"errors":  "Internal Server Error",
+			})
+			return
+		} else {
+			errKey := errObj.Property
+			if errKey == "" {
+				errKey = "error"
+			}
+			utilities.WriteJSON(w, statusCode, map[string]interface{}{
+				"message": "Failed to assign menu",
+				"errors": map[string]string{
+					errKey: errObj.MessageToSend,
+				},
+			})
+			return
+		}
+	}
+	utilities.Log(reqId, utilities.DEBUG, path, "roleController.assignMenuCtrl", nil, "success", nil)
+	utilities.WriteJSON(w, http.StatusCreated, map[string]string{
+		"message": "List Menu assigned successfully",
 	})
 }
 

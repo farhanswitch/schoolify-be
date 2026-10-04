@@ -15,7 +15,8 @@ type mockRoleRepo struct {
 	CreateFunc  func(ctx context.Context, param models.CreateRoleRequest) errUtility.CustomError
 	UpdateFunc  func(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError
 	GetByIDFunc func(ctx context.Context, roleID uuid.UUID) (models.RoleResponse, errUtility.CustomError)
-	DeleteFunc  func(ctx context.Context, roleID uuid.UUID) errUtility.CustomError
+	DeleteFunc     func(ctx context.Context, roleID uuid.UUID) errUtility.CustomError
+	AssignMenuFunc func(ctx context.Context, roleID uuid.UUID, param models.AssignMenuRequest) errUtility.CustomError
 }
 
 func (m *mockRoleRepo) GetAll(ctx context.Context) ([]models.RoleResponse, errUtility.CustomError) {
@@ -52,6 +53,14 @@ func (m *mockRoleRepo) Delete(ctx context.Context, roleID uuid.UUID) errUtility.
 	}
 	return errUtility.CustomError{}
 }
+
+func (m *mockRoleRepo) AssignMenu(ctx context.Context, roleID uuid.UUID, param models.AssignMenuRequest) errUtility.CustomError {
+	if m.AssignMenuFunc != nil {
+		return m.AssignMenuFunc(ctx, roleID, param)
+	}
+	return errUtility.CustomError{}
+}
+
 
 func TestBuildRoleTree(t *testing.T) {
 	t.Run("should return empty slice when input is empty", func(t *testing.T) {
@@ -598,6 +607,113 @@ func TestDeleteSrvc(t *testing.T) {
 		}
 	})
 }
+
+func TestAssignMenuSrvc(t *testing.T) {
+	ctx := context.Background()
+	roleID := uuid.New()
+	menuID := uuid.New()
+	req := models.AssignMenuRequest{
+		MenuIds: []uuid.UUID{menuID},
+	}
+
+	t.Run("should return error when repository fails", func(t *testing.T) {
+		mockRepo := &mockRoleRepo{
+			AssignMenuFunc: func(ctx context.Context, rID uuid.UUID, param models.AssignMenuRequest) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusInternalServerError,
+					Message:       "internal database failure",
+					MessageToSend: "Failed to assign menu",
+					Function:      "RolePostgresRepo.AssignMenu",
+				}
+			},
+		}
+
+		srv := roleService{repo: mockRepo}
+		errObj := srv.AssignMenuSrvc(ctx, roleID, req)
+
+		if errObj.Code != http.StatusInternalServerError {
+			t.Errorf("expected error code %d, got %d", http.StatusInternalServerError, errObj.Code)
+		}
+		if errObj.MessageToSend != "Failed to assign menu" {
+			t.Errorf("expected message 'Failed to assign menu', got '%s'", errObj.MessageToSend)
+		}
+	})
+
+	t.Run("should return 404 when role does not exist", func(t *testing.T) {
+		mockRepo := &mockRoleRepo{
+			AssignMenuFunc: func(ctx context.Context, rID uuid.UUID, param models.AssignMenuRequest) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusNotFound,
+					MessageToSend: "Role not found",
+					Property:      "roleID",
+					Function:      "RolePostgresRepo.AssignMenu",
+				}
+			},
+		}
+
+		srv := roleService{repo: mockRepo}
+		errObj := srv.AssignMenuSrvc(ctx, roleID, req)
+
+		if errObj.Code != http.StatusNotFound {
+			t.Errorf("expected error code %d, got %d", http.StatusNotFound, errObj.Code)
+		}
+		if errObj.MessageToSend != "Role not found" {
+			t.Errorf("expected message 'Role not found', got '%s'", errObj.MessageToSend)
+		}
+		if errObj.Property != "roleID" {
+			t.Errorf("expected property 'roleID', got '%s'", errObj.Property)
+		}
+	})
+
+	t.Run("should return 400 when menu ID does not exist in database", func(t *testing.T) {
+		mockRepo := &mockRoleRepo{
+			AssignMenuFunc: func(ctx context.Context, rID uuid.UUID, param models.AssignMenuRequest) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusBadRequest,
+					MessageToSend: "Menu with ID " + menuID.String() + " does not exist",
+					Property:      "listID",
+					Function:      "RolePostgresRepo.AssignMenu",
+				}
+			},
+		}
+
+		srv := roleService{repo: mockRepo}
+		errObj := srv.AssignMenuSrvc(ctx, roleID, req)
+
+		if errObj.Code != http.StatusBadRequest {
+			t.Errorf("expected error code %d, got %d", http.StatusBadRequest, errObj.Code)
+		}
+		if errObj.Property != "listID" {
+			t.Errorf("expected property 'listID', got '%s'", errObj.Property)
+		}
+	})
+
+	t.Run("should return success when repository succeeds", func(t *testing.T) {
+		var capturedRoleID uuid.UUID
+		var capturedParam models.AssignMenuRequest
+		mockRepo := &mockRoleRepo{
+			AssignMenuFunc: func(ctx context.Context, rID uuid.UUID, param models.AssignMenuRequest) errUtility.CustomError {
+				capturedRoleID = rID
+				capturedParam = param
+				return errUtility.CustomError{}
+			},
+		}
+
+		srv := roleService{repo: mockRepo}
+		errObj := srv.AssignMenuSrvc(ctx, roleID, req)
+
+		if errObj.Code != 0 {
+			t.Fatalf("expected error code 0, got %d", errObj.Code)
+		}
+		if capturedRoleID != roleID {
+			t.Errorf("expected roleID %s, got %s", roleID, capturedRoleID)
+		}
+		if len(capturedParam.MenuIds) != 1 || capturedParam.MenuIds[0] != menuID {
+			t.Errorf("expected param with menuID %s, got %+v", menuID, capturedParam)
+		}
+	})
+}
+
 
 
 
