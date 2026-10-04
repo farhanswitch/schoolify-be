@@ -12,5 +12,6 @@ func InitModule(router *chi.Mux) {
 	controller := factoryMenuController(repo)
 
 	router.With(utilities.AuthMiddleware).Get("/api/menu/list", controller.getAllMenusCtrl)
+	router.With(utilities.AuthMiddleware).Get("/api/menu/{menuID}", controller.GetByIDCtrl)
 	router.With(utilities.AuthMiddleware).Post("/api/menu", controller.createCtrl)
 }

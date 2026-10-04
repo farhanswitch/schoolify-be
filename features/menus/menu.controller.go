@@ -10,7 +10,9 @@ import (
 	utilities "schoolify_be/utilities"
 	errUtility "schoolify_be/utilities/errors"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 )
 
 var validate *validator.Validate
@@ -22,10 +24,70 @@ func init() {
 type menuServiceInterface interface {
 	GetAllMenusSrvc(ctx context.Context) ([]*models.MenuResponse, errUtility.CustomError)
 	CreateMenuSrvc(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
+	GetByIDSrvc(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError)
 }
 
 type menuController struct {
 	service menuServiceInterface
+}
+
+func (c menuController) GetByIDCtrl(w http.ResponseWriter, r *http.Request) {
+	reqId := utilities.GetReqID(r.Context())
+	path := r.URL.Path
+	menuID := chi.URLParam(r, "menuID")
+	utilities.Log(reqId, utilities.DEBUG, path, "menuController.GetByIDCtrl", map[string]string{"menuID": menuID}, "incoming request", nil)
+	if menuID == "" {
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors":  map[string]string{"menuID": "menuID path parameter is required"},
+		})
+		return
+	}
+	menuUUID, err := uuid.Parse(menuID)
+	if err != nil {
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors": map[string][]string{
+				"menuID": []string{"Invalid menuID"},
+			},
+		})
+		return
+	}
+	data, errObj := c.service.GetByIDSrvc(r.Context(), menuUUID)
+	if errObj.Code > 0 {
+		errObj.Compile()
+		statusCode := int(errObj.Code)
+
+		logLevel := utilities.ERROR
+		if statusCode < 500 {
+			logLevel = utilities.WARN
+		}
+		utilities.Log(reqId, logLevel, path, "menuController.GetByIDCtrl", map[string]string{"menuID": menuID}, "service execution failed", errObj)
+
+		if statusCode == 500 {
+			utilities.WriteJSON(w, statusCode, map[string]interface{}{
+				"message": "Failed to get menu",
+				"errors":  "Internal Server Error",
+			})
+			return
+		} else {
+			errKey := errObj.Property
+			if errKey == "" {
+				errKey = "error"
+			}
+			utilities.WriteJSON(w, statusCode, map[string]interface{}{
+				"message": "Failed to get menu",
+				"errors": map[string]string{
+					errKey: errObj.MessageToSend,
+				},
+			})
+			return
+		}
+	}
+	utilities.WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"message": "Menu retrieved successfully",
+		"data":    data,
+	})
 }
 
 func (c menuController) getAllMenusCtrl(w http.ResponseWriter, r *http.Request) {

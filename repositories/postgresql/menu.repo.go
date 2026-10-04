@@ -116,6 +116,35 @@ func (r MenuPostgresRepo) Create(ctx context.Context, param models.CreateMenuReq
 	return errUtility.CustomError{}
 }
 
+func (r MenuPostgresRepo) GetByID(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError) {
+	db := connections.DbPostgres()
+	var data models.MenuResponse
+	var parentId, description, updatedAt sql.NullString
+	query := "SELECT id, parent_id, name, description, created_at, updated_at FROM menus WHERE id=$1;"
+	err := db.QueryRowContext(ctx, query, menuID).Scan(&data.Id, &parentId, &data.Name, &description, &data.CreatedAt, &updatedAt)
+
+	if err != nil {
+		return models.MenuResponse{}, errUtility.CustomError{
+			Code:          http.StatusNotFound,
+			Message:       err.Error(),
+			MessageToSend: "Menu not found",
+			Function:      "MenuPostgresRepo.GetByID",
+			Property:      "id",
+		}
+	}
+	if parentId.Valid && parentId.String != "" {
+		pId := parentId.String
+		data.ParentId = &pId
+	}
+	if description.Valid {
+		data.Description = description.String
+	}
+	if updatedAt.Valid {
+		data.UpdatedAt = updatedAt.String
+	}
+	return data, errUtility.CustomError{}
+}
+
 func FactoryMenuRepo() MenuPostgresRepo {
 	if menuRepo == (MenuPostgresRepo{}) {
 		menuRepo = MenuPostgresRepo{}

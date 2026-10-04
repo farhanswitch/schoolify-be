@@ -12,6 +12,7 @@ import (
 type menuPostgresRepoInterface interface {
 	GetAll(ctx context.Context) ([]models.MenuResponse, errUtility.CustomError)
 	Create(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
+	GetByID(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError)
 }
 
 type menuService struct {
@@ -72,6 +73,10 @@ func (s menuService) CreateMenuSrvc(ctx context.Context, param models.CreateMenu
 	}
 	param.ID = id
 	return s.repo.Create(ctx, param)
+}
+
+func (s menuService) GetByIDSrvc(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError) {
+	return s.repo.GetByID(ctx, menuID)
 }
 
 func factoryMenuService(repo menuPostgresRepoInterface) menuService {

@@ -12,8 +12,9 @@ import (
 )
 
 type mockMenuRepo struct {
-	GetAllFunc func(ctx context.Context) ([]models.MenuResponse, errUtility.CustomError)
-	CreateFunc func(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
+	GetAllFunc  func(ctx context.Context) ([]models.MenuResponse, errUtility.CustomError)
+	CreateFunc  func(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
+	GetByIDFunc func(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError)
 }
 
 func (m *mockMenuRepo) GetAll(ctx context.Context) ([]models.MenuResponse, errUtility.CustomError) {
@@ -28,6 +29,13 @@ func (m *mockMenuRepo) Create(ctx context.Context, param models.CreateMenuReques
 		return m.CreateFunc(ctx, param)
 	}
 	return errUtility.CustomError{}
+}
+
+func (m *mockMenuRepo) GetByID(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError) {
+	if m.GetByIDFunc != nil {
+		return m.GetByIDFunc(ctx, menuID)
+	}
+	return models.MenuResponse{}, errUtility.CustomError{}
 }
 
 func TestBuildMenuTree(t *testing.T) {
@@ -298,3 +306,62 @@ func TestCreateMenuSrvc(t *testing.T) {
 		}
 	})
 }
+
+func TestGetByIDSrvc(t *testing.T) {
+	ctx := context.Background()
+	menuID := uuid.New()
+
+	t.Run("should return error when repository fails / menu not found", func(t *testing.T) {
+		mockRepo := &mockMenuRepo{
+			GetByIDFunc: func(ctx context.Context, id uuid.UUID) (models.MenuResponse, errUtility.CustomError) {
+				return models.MenuResponse{}, errUtility.CustomError{
+					Code:          http.StatusNotFound,
+					Message:       "sql: no rows in result set",
+					MessageToSend: "Menu not found",
+					Function:      "MenuPostgresRepo.GetByID",
+				}
+			},
+		}
+
+		srv := menuService{repo: mockRepo}
+		result, errObj := srv.GetByIDSrvc(ctx, menuID)
+
+		if errObj.Code != http.StatusNotFound {
+			t.Errorf("expected error code %d, got %d", http.StatusNotFound, errObj.Code)
+		}
+		if errObj.MessageToSend != "Menu not found" {
+			t.Errorf("expected message 'Menu not found', got '%s'", errObj.MessageToSend)
+		}
+		if result.Id != "" {
+			t.Errorf("expected empty MenuResponse, got ID %s", result.Id)
+		}
+	})
+
+	t.Run("should return menu when repository succeeds", func(t *testing.T) {
+		expectedMenu := models.MenuResponse{
+			Id:          menuID.String(),
+			Name:        "Dashboard",
+			Description: "Dashboard menu",
+			CreatedAt:   "2026-10-04 13:00:00",
+		}
+		mockRepo := &mockMenuRepo{
+			GetByIDFunc: func(ctx context.Context, id uuid.UUID) (models.MenuResponse, errUtility.CustomError) {
+				return expectedMenu, errUtility.CustomError{}
+			},
+		}
+
+		srv := menuService{repo: mockRepo}
+		result, errObj := srv.GetByIDSrvc(ctx, menuID)
+
+		if errObj.Code != 0 {
+			t.Fatalf("expected error code 0, got %d", errObj.Code)
+		}
+		if result.Id != menuID.String() {
+			t.Errorf("expected menu ID %s, got %s", menuID.String(), result.Id)
+		}
+		if result.Name != expectedMenu.Name {
+			t.Errorf("expected menu name %s, got %s", expectedMenu.Name, result.Name)
+		}
+	})
+}
+

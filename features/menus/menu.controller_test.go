@@ -12,12 +12,14 @@ import (
 	models "schoolify_be/models"
 	errUtility "schoolify_be/utilities/errors"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
 type mockMenuService struct {
 	GetAllMenusSrvcFunc func(ctx context.Context) ([]*models.MenuResponse, errUtility.CustomError)
 	CreateMenuSrvcFunc  func(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
+	GetByIDSrvcFunc     func(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError)
 }
 
 func (m *mockMenuService) GetAllMenusSrvc(ctx context.Context) ([]*models.MenuResponse, errUtility.CustomError) {
@@ -32,6 +34,13 @@ func (m *mockMenuService) CreateMenuSrvc(ctx context.Context, param models.Creat
 		return m.CreateMenuSrvcFunc(ctx, param)
 	}
 	return errUtility.CustomError{}
+}
+
+func (m *mockMenuService) GetByIDSrvc(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError) {
+	if m.GetByIDSrvcFunc != nil {
+		return m.GetByIDSrvcFunc(ctx, menuID)
+	}
+	return models.MenuResponse{}, errUtility.CustomError{}
 }
 
 func TestGetAllMenusCtrl(t *testing.T) {
@@ -240,3 +249,124 @@ func TestCreateCtrl(t *testing.T) {
 		}
 	})
 }
+
+func TestGetByIDCtrl(t *testing.T) {
+	testUUID := uuid.New()
+
+	newRequestWithParam := func(method, target, paramKey, paramVal string) *http.Request {
+		req := httptest.NewRequest(method, target, nil)
+		rctx := chi.NewRouteContext()
+		if paramKey != "" {
+			rctx.URLParams.Add(paramKey, paramVal)
+		}
+		return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	}
+
+	t.Run("should return 400 when menuID is missing from path parameter", func(t *testing.T) {
+		ctrl := menuController{service: &mockMenuService{}}
+		req := newRequestWithParam(http.MethodGet, "/api/menu/", "", "")
+		w := httptest.NewRecorder()
+
+		ctrl.GetByIDCtrl(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "menuID path parameter is required") {
+			t.Errorf("expected response to contain 'menuID path parameter is required', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 400 when menuID is not a valid UUID", func(t *testing.T) {
+		ctrl := menuController{service: &mockMenuService{}}
+		req := newRequestWithParam(http.MethodGet, "/api/menu/not-a-uuid", "menuID", "not-a-uuid")
+		w := httptest.NewRecorder()
+
+		ctrl.GetByIDCtrl(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Invalid menuID") {
+			t.Errorf("expected response to contain 'Invalid menuID', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 404 when menu is not found", func(t *testing.T) {
+		mockSrv := &mockMenuService{
+			GetByIDSrvcFunc: func(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError) {
+				return models.MenuResponse{}, errUtility.CustomError{
+					Code:          http.StatusNotFound,
+					MessageToSend: "Menu not found",
+					Property:      "id",
+				}
+			},
+		}
+		ctrl := menuController{service: mockSrv}
+		req := newRequestWithParam(http.MethodGet, "/api/menu/"+testUUID.String(), "menuID", testUUID.String())
+		w := httptest.NewRecorder()
+
+		ctrl.GetByIDCtrl(w, req)
+
+		if w.Code != http.StatusNotFound {
+			t.Errorf("expected status 404, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Menu not found") {
+			t.Errorf("expected response to contain 'Menu not found', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 500 when service fails unexpectedly", func(t *testing.T) {
+		mockSrv := &mockMenuService{
+			GetByIDSrvcFunc: func(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError) {
+				return models.MenuResponse{}, errUtility.CustomError{
+					Code:          http.StatusInternalServerError,
+					Message:       "internal database failure",
+					MessageToSend: "Failed get menu",
+				}
+			},
+		}
+		ctrl := menuController{service: mockSrv}
+		req := newRequestWithParam(http.MethodGet, "/api/menu/"+testUUID.String(), "menuID", testUUID.String())
+		w := httptest.NewRecorder()
+
+		ctrl.GetByIDCtrl(w, req)
+
+		if w.Code != http.StatusInternalServerError {
+			t.Errorf("expected status 500, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Internal Server Error") {
+			t.Errorf("expected response to contain 'Internal Server Error', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return 200 with menu data on success", func(t *testing.T) {
+		expectedMenu := models.MenuResponse{
+			Id:          testUUID.String(),
+			Name:        "Dashboard",
+			Description: "Dashboard menu",
+			CreatedAt:   "2026-10-04 13:00:00",
+		}
+		mockSrv := &mockMenuService{
+			GetByIDSrvcFunc: func(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError) {
+				return expectedMenu, errUtility.CustomError{}
+			},
+		}
+		ctrl := menuController{service: mockSrv}
+		req := newRequestWithParam(http.MethodGet, "/api/menu/"+testUUID.String(), "menuID", testUUID.String())
+		w := httptest.NewRecorder()
+
+		ctrl.GetByIDCtrl(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("expected status 200, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Menu retrieved successfully") {
+			t.Errorf("expected response to contain 'Menu retrieved successfully', got %s", w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "Dashboard") {
+			t.Errorf("expected response to contain menu name 'Dashboard', got %s", w.Body.String())
+		}
+	})
+}
+
