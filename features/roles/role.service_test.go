@@ -13,6 +13,7 @@ import (
 type mockRoleRepo struct {
 	GetAllFunc func(ctx context.Context) ([]models.RoleResponse, errUtility.CustomError)
 	CreateFunc func(ctx context.Context, param models.CreateRoleRequest) errUtility.CustomError
+	UpdateFunc func(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError
 }
 
 func (m *mockRoleRepo) GetAll(ctx context.Context) ([]models.RoleResponse, errUtility.CustomError) {
@@ -25,6 +26,13 @@ func (m *mockRoleRepo) GetAll(ctx context.Context) ([]models.RoleResponse, errUt
 func (m *mockRoleRepo) Create(ctx context.Context, param models.CreateRoleRequest) errUtility.CustomError {
 	if m.CreateFunc != nil {
 		return m.CreateFunc(ctx, param)
+	}
+	return errUtility.CustomError{}
+}
+
+func (m *mockRoleRepo) Update(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError {
+	if m.UpdateFunc != nil {
+		return m.UpdateFunc(ctx, param)
 	}
 	return errUtility.CustomError{}
 }
@@ -288,3 +296,139 @@ func TestCreateRoleSrvc(t *testing.T) {
 		}
 	})
 }
+
+func TestUpdateRoleSrvc(t *testing.T) {
+	ctx := context.Background()
+	req := models.UpdateRoleRequest{
+		ID:          uuid.New(),
+		Name:        "Senior Teacher",
+		Description: "Updated teacher role",
+	}
+
+	t.Run("should return error when repository fails", func(t *testing.T) {
+		mockRepo := &mockRoleRepo{
+			UpdateFunc: func(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusInternalServerError,
+					Message:       "database error",
+					MessageToSend: "Failed update role",
+					Function:      "RolePostgresRepo.Update",
+				}
+			},
+		}
+
+		srv := roleService{repo: mockRepo}
+		errObj := srv.UpdateRoleSrvc(ctx, req)
+
+		if errObj.Code != http.StatusInternalServerError {
+			t.Errorf("expected error code %d, got %d", http.StatusInternalServerError, errObj.Code)
+		}
+		if errObj.MessageToSend != "Failed update role" {
+			t.Errorf("expected message 'Failed update role', got '%s'", errObj.MessageToSend)
+		}
+	})
+
+	t.Run("should return error when parent role does not exist (foreign key constraint)", func(t *testing.T) {
+		reqWithParent := models.UpdateRoleRequest{
+			ID:          req.ID,
+			ParentID:    uuid.New(),
+			Name:        "Assistant Teacher",
+			Description: "Assistant teacher role",
+		}
+		mockRepo := &mockRoleRepo{
+			UpdateFunc: func(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusBadRequest,
+					Message:       "pq: insert or update on table \"roles\" violates foreign key constraint \"roles_parent_id_fkey\"",
+					MessageToSend: "Parent role with the specified ID does not exist",
+					Property:      "parentID",
+					Function:      "RolePostgresRepo.Update",
+				}
+			},
+		}
+
+		srv := roleService{repo: mockRepo}
+		errObj := srv.UpdateRoleSrvc(ctx, reqWithParent)
+
+		if errObj.Code != http.StatusBadRequest {
+			t.Errorf("expected error code %d, got %d", http.StatusBadRequest, errObj.Code)
+		}
+		if errObj.Property != "parentID" {
+			t.Errorf("expected property 'parentID', got '%s'", errObj.Property)
+		}
+	})
+
+	t.Run("should return error when role name already exists (unique constraint)", func(t *testing.T) {
+		mockRepo := &mockRoleRepo{
+			UpdateFunc: func(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusConflict,
+					Message:       "unique constraint",
+					MessageToSend: "Role name already exists",
+					Property:      "name",
+					Function:      "RolePostgresRepo.Update",
+				}
+			},
+		}
+
+		srv := roleService{repo: mockRepo}
+		errObj := srv.UpdateRoleSrvc(ctx, req)
+
+		if errObj.Code != http.StatusConflict {
+			t.Errorf("expected error code %d, got %d", http.StatusConflict, errObj.Code)
+		}
+		if errObj.Property != "name" {
+			t.Errorf("expected property 'name', got '%s'", errObj.Property)
+		}
+	})
+
+	t.Run("should return error when role to update is not found (404)", func(t *testing.T) {
+		mockRepo := &mockRoleRepo{
+			UpdateFunc: func(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError {
+				return errUtility.CustomError{
+					Code:          http.StatusNotFound,
+					MessageToSend: "Role not found",
+					Function:      "RolePostgresRepo.Update",
+					Property:      "id",
+				}
+			},
+		}
+
+		srv := roleService{repo: mockRepo}
+		errObj := srv.UpdateRoleSrvc(ctx, req)
+
+		if errObj.Code != http.StatusNotFound {
+			t.Errorf("expected error code %d, got %d", http.StatusNotFound, errObj.Code)
+		}
+		if errObj.MessageToSend != "Role not found" {
+			t.Errorf("expected message 'Role not found', got '%s'", errObj.MessageToSend)
+		}
+		if errObj.Property != "id" {
+			t.Errorf("expected property 'id', got '%s'", errObj.Property)
+		}
+	})
+
+	t.Run("should return success when repository succeeds", func(t *testing.T) {
+		var capturedParam models.UpdateRoleRequest
+		mockRepo := &mockRoleRepo{
+			UpdateFunc: func(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError {
+				capturedParam = param
+				return errUtility.CustomError{}
+			},
+		}
+
+		srv := roleService{repo: mockRepo}
+		errObj := srv.UpdateRoleSrvc(ctx, req)
+
+		if errObj.Code != 0 {
+			t.Fatalf("expected error code 0, got %d", errObj.Code)
+		}
+		if capturedParam.ID != req.ID {
+			t.Errorf("expected ID %s, got %s", req.ID, capturedParam.ID)
+		}
+		if capturedParam.Name != req.Name {
+			t.Errorf("expected name %s, got %s", req.Name, capturedParam.Name)
+		}
+	})
+}
+
