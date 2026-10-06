@@ -26,6 +26,7 @@ type apiServiceInterface interface {
 	GetAllSrvc(ctx context.Context, param models.GetAllApiRequest) ([]models.ApiResponse, int, errUtility.CustomError)
 	CreateApiSrvc(ctx context.Context, param models.CreateApiRequest) errUtility.CustomError
 	UpdateApiSrvc(ctx context.Context, apiID uuid.UUID, param models.UpdateApiRequest) errUtility.CustomError
+	DeleteApiSrvc(ctx context.Context, apiID uuid.UUID) errUtility.CustomError
 }
 
 type apiController struct {
@@ -165,6 +166,62 @@ func (c apiController) updateCtrl(w http.ResponseWriter, r *http.Request) {
 	utilities.Log(reqID, utilities.DEBUG, path, "apiController.updateCtrl", nil, "success", nil)
 	utilities.WriteJSON(w, http.StatusOK, map[string]string{
 		"message": "API updated successfully",
+	})
+}
+
+func (c apiController) deleteCtrl(w http.ResponseWriter, r *http.Request) {
+	reqID := utilities.GetReqID(r.Context())
+	path := r.URL.Path
+	apiIDStr := chi.URLParam(r, "apiID")
+	if apiIDStr == "" {
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors":  map[string][]string{"apiID": {"apiID path parameter is required"}},
+		})
+		return
+	}
+
+	apiID, err := uuid.Parse(apiIDStr)
+	if err != nil {
+		utilities.Log(reqID, utilities.WARN, path, "apiController.deleteCtrl", map[string]string{"apiID": apiIDStr}, "invalid apiID", err)
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors":  map[string][]string{"apiID": {"Invalid apiID"}},
+		})
+		return
+	}
+
+	if errObj := c.service.DeleteApiSrvc(r.Context(), apiID); errObj.Code > 0 {
+		errObj.Compile()
+		statusCode := int(errObj.Code)
+		logLevel := utilities.ERROR
+		if statusCode < http.StatusInternalServerError {
+			logLevel = utilities.WARN
+		}
+		utilities.Log(reqID, logLevel, path, "apiController.deleteCtrl", map[string]string{"apiID": apiIDStr}, "service execution failed", errObj)
+
+		if statusCode == http.StatusInternalServerError {
+			utilities.WriteJSON(w, statusCode, map[string]interface{}{
+				"message": "Failed to delete API",
+				"errors":  "Internal Server Error",
+			})
+			return
+		}
+
+		errKey := errObj.Property
+		if errKey == "" {
+			errKey = "error"
+		}
+		utilities.WriteJSON(w, statusCode, map[string]interface{}{
+			"message": "Failed to delete API",
+			"errors":  map[string]string{errKey: errObj.MessageToSend},
+		})
+		return
+	}
+
+	utilities.Log(reqID, utilities.DEBUG, path, "apiController.deleteCtrl", map[string]string{"apiID": apiIDStr}, "success", nil)
+	utilities.WriteJSON(w, http.StatusOK, map[string]string{
+		"message": "API deleted successfully",
 	})
 }
 

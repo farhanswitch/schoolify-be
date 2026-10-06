@@ -15,6 +15,7 @@ type mockApiPostgresRepo struct {
 	GetAllFunc func(ctx context.Context, param models.GetAllApiRequest) ([]models.ApiResponse, int, errUtility.CustomError)
 	CreateFunc func(ctx context.Context, param models.CreateApiRequest) errUtility.CustomError
 	UpdateFunc func(ctx context.Context, apiID uuid.UUID, param models.UpdateApiRequest) errUtility.CustomError
+	DeleteFunc func(ctx context.Context, apiID uuid.UUID) errUtility.CustomError
 }
 
 func (m *mockApiPostgresRepo) GetAll(ctx context.Context, param models.GetAllApiRequest) ([]models.ApiResponse, int, errUtility.CustomError) {
@@ -36,6 +37,63 @@ func (m *mockApiPostgresRepo) Update(ctx context.Context, apiID uuid.UUID, param
 		return m.UpdateFunc(ctx, apiID, param)
 	}
 	return errUtility.CustomError{}
+}
+
+func (m *mockApiPostgresRepo) Delete(ctx context.Context, apiID uuid.UUID) errUtility.CustomError {
+	if m.DeleteFunc != nil {
+		return m.DeleteFunc(ctx, apiID)
+	}
+	return errUtility.CustomError{}
+}
+
+func TestDeleteApiSrvc(t *testing.T) {
+	ctx := context.Background()
+	apiID := uuid.New()
+
+	t.Run("should pass ID to repository", func(t *testing.T) {
+		var capturedID uuid.UUID
+		srv := apiService{repo: &mockApiPostgresRepo{
+			DeleteFunc: func(ctx context.Context, id uuid.UUID) errUtility.CustomError {
+				capturedID = id
+				return errUtility.CustomError{}
+			},
+		}}
+
+		errObj := srv.DeleteApiSrvc(ctx, apiID)
+
+		if errObj.Code != 0 {
+			t.Fatalf("expected no error, got %+v", errObj)
+		}
+		if capturedID != apiID {
+			t.Errorf("expected apiID %s, got %s", apiID, capturedID)
+		}
+	})
+
+	t.Run("should return repository not-found error", func(t *testing.T) {
+		srv := apiService{repo: &mockApiPostgresRepo{
+			DeleteFunc: func(ctx context.Context, id uuid.UUID) errUtility.CustomError {
+				return errUtility.CustomError{Code: http.StatusNotFound, MessageToSend: "API not found", Property: "apiID"}
+			},
+		}}
+
+		errObj := srv.DeleteApiSrvc(ctx, apiID)
+		if errObj.Code != http.StatusNotFound || errObj.Property != "apiID" {
+			t.Errorf("expected not-found error for apiID, got %+v", errObj)
+		}
+	})
+
+	t.Run("should return repository internal error", func(t *testing.T) {
+		srv := apiService{repo: &mockApiPostgresRepo{
+			DeleteFunc: func(ctx context.Context, id uuid.UUID) errUtility.CustomError {
+				return errUtility.CustomError{Code: http.StatusInternalServerError, MessageToSend: "Failed to delete API"}
+			},
+		}}
+
+		errObj := srv.DeleteApiSrvc(ctx, apiID)
+		if errObj.Code != http.StatusInternalServerError {
+			t.Errorf("expected status 500, got %d", errObj.Code)
+		}
+	})
 }
 
 func TestUpdateApiSrvc(t *testing.T) {

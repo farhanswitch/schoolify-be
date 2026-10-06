@@ -18,6 +18,7 @@ type mockApiService struct {
 	GetAllSrvcFunc    func(ctx context.Context, param models.GetAllApiRequest) ([]models.ApiResponse, int, errUtility.CustomError)
 	CreateApiSrvcFunc func(ctx context.Context, param models.CreateApiRequest) errUtility.CustomError
 	UpdateApiSrvcFunc func(ctx context.Context, apiID uuid.UUID, param models.UpdateApiRequest) errUtility.CustomError
+	DeleteApiSrvcFunc func(ctx context.Context, apiID uuid.UUID) errUtility.CustomError
 }
 
 func (m *mockApiService) GetAllSrvc(ctx context.Context, param models.GetAllApiRequest) ([]models.ApiResponse, int, errUtility.CustomError) {
@@ -41,11 +42,113 @@ func (m *mockApiService) UpdateApiSrvc(ctx context.Context, apiID uuid.UUID, par
 	return errUtility.CustomError{}
 }
 
+func (m *mockApiService) DeleteApiSrvc(ctx context.Context, apiID uuid.UUID) errUtility.CustomError {
+	if m.DeleteApiSrvcFunc != nil {
+		return m.DeleteApiSrvcFunc(ctx, apiID)
+	}
+	return errUtility.CustomError{}
+}
+
 func updateRequest(apiID, body string) *http.Request {
 	request := httptest.NewRequest(http.MethodPut, "/api/endpoint/"+apiID, strings.NewReader(body))
 	routeContext := chi.NewRouteContext()
 	routeContext.URLParams.Add("apiID", apiID)
 	return request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+}
+
+func deleteRequest(apiID string) *http.Request {
+	request := httptest.NewRequest(http.MethodDelete, "/api/endpoint/"+apiID, nil)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("apiID", apiID)
+	return request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+}
+
+func TestDeleteCtrl(t *testing.T) {
+	apiID := uuid.New()
+
+	t.Run("should return 200 when API is deleted", func(t *testing.T) {
+		var capturedID uuid.UUID
+		ctrl := apiController{service: &mockApiService{
+			DeleteApiSrvcFunc: func(ctx context.Context, id uuid.UUID) errUtility.CustomError {
+				capturedID = id
+				return errUtility.CustomError{}
+			},
+		}}
+		writer := httptest.NewRecorder()
+
+		ctrl.deleteCtrl(writer, deleteRequest(apiID.String()))
+
+		if writer.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", writer.Code)
+		}
+		if capturedID != apiID {
+			t.Errorf("expected apiID %s, got %s", apiID, capturedID)
+		}
+		if !strings.Contains(writer.Body.String(), "API deleted successfully") {
+			t.Errorf("expected success message, got %s", writer.Body.String())
+		}
+	})
+
+	t.Run("should return 400 when apiID is missing", func(t *testing.T) {
+		ctrl := apiController{service: &mockApiService{}}
+		writer := httptest.NewRecorder()
+
+		ctrl.deleteCtrl(writer, deleteRequest(""))
+
+		if writer.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", writer.Code)
+		}
+	})
+
+	t.Run("should return 400 when apiID is invalid", func(t *testing.T) {
+		ctrl := apiController{service: &mockApiService{}}
+		writer := httptest.NewRecorder()
+
+		ctrl.deleteCtrl(writer, deleteRequest("invalid-id"))
+
+		if writer.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", writer.Code)
+		}
+		if !strings.Contains(writer.Body.String(), "Invalid apiID") {
+			t.Errorf("expected invalid apiID error, got %s", writer.Body.String())
+		}
+	})
+
+	t.Run("should return 404 when API does not exist", func(t *testing.T) {
+		ctrl := apiController{service: &mockApiService{
+			DeleteApiSrvcFunc: func(ctx context.Context, id uuid.UUID) errUtility.CustomError {
+				return errUtility.CustomError{Code: http.StatusNotFound, MessageToSend: "API not found", Property: "apiID"}
+			},
+		}}
+		writer := httptest.NewRecorder()
+
+		ctrl.deleteCtrl(writer, deleteRequest(apiID.String()))
+
+		if writer.Code != http.StatusNotFound {
+			t.Errorf("expected status 404, got %d", writer.Code)
+		}
+		if !strings.Contains(writer.Body.String(), "API not found") {
+			t.Errorf("expected not-found error, got %s", writer.Body.String())
+		}
+	})
+
+	t.Run("should return 500 when service fails", func(t *testing.T) {
+		ctrl := apiController{service: &mockApiService{
+			DeleteApiSrvcFunc: func(ctx context.Context, id uuid.UUID) errUtility.CustomError {
+				return errUtility.CustomError{Code: http.StatusInternalServerError, Message: "database unavailable"}
+			},
+		}}
+		writer := httptest.NewRecorder()
+
+		ctrl.deleteCtrl(writer, deleteRequest(apiID.String()))
+
+		if writer.Code != http.StatusInternalServerError {
+			t.Errorf("expected status 500, got %d", writer.Code)
+		}
+		if !strings.Contains(writer.Body.String(), "Internal Server Error") {
+			t.Errorf("expected generic internal error, got %s", writer.Body.String())
+		}
+	})
 }
 
 func TestUpdateCtrl(t *testing.T) {
