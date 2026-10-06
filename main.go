@@ -7,6 +7,7 @@ import (
 
 	configs "schoolify_be/configs"
 	connections "schoolify_be/connections"
+	featApi "schoolify_be/features/apis"
 	featAuthor "schoolify_be/features/authors"
 	featMenu "schoolify_be/features/menus"
 	featRole "schoolify_be/features/roles"
@@ -51,6 +52,7 @@ func internalModules(router *chi.Mux) {
 	featUser.InitModule(router)
 	featRole.InitModule(router)
 	featMenu.InitModule(router)
+	featApi.InitModule(router)
 	// users.InitModule(router)
 	// files.InitModule(router)
 	// markets.InitModule(router)
