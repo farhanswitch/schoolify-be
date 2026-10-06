@@ -22,6 +22,17 @@ type AssignApiRequest struct {
 	ApiIDs uuid.UUIDs `json:"listID" validate:"required,dive,required"`
 }
 
+type MenuApiResponse struct {
+	Id          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Path        string    `json:"path"`
+	Method      string    `json:"method"`
+	CreatedAt   string    `json:"createdAt"`
+	UpdatedAt   string    `json:"updatedAt"`
+	Status      int       `json:"status"`
+}
+
 type MenuResponse struct {
 	Id          string          `json:"id"`
 	ParentId    *string         `json:"parentId"`

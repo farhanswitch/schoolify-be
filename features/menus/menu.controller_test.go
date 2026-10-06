@@ -17,12 +17,13 @@ import (
 )
 
 type mockMenuService struct {
-	GetAllMenusSrvcFunc func(ctx context.Context) ([]*models.MenuResponse, errUtility.CustomError)
-	CreateMenuSrvcFunc  func(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
-	GetByIDSrvcFunc     func(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError)
-	UpdateMenuSrvcFunc  func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError
-	AssignApiSrvcFunc   func(ctx context.Context, menuID uuid.UUID, param models.AssignApiRequest) errUtility.CustomError
-	DeleteSrvcFunc      func(ctx context.Context, menuID uuid.UUID) errUtility.CustomError
+	GetAllMenusSrvcFunc          func(ctx context.Context) ([]*models.MenuResponse, errUtility.CustomError)
+	CreateMenuSrvcFunc           func(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
+	GetByIDSrvcFunc              func(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError)
+	UpdateMenuSrvcFunc           func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError
+	AssignApiSrvcFunc            func(ctx context.Context, menuID uuid.UUID, param models.AssignApiRequest) errUtility.CustomError
+	GetAssignedEndpointsSrvcFunc func(ctx context.Context, menuID uuid.UUID) ([]models.MenuApiResponse, errUtility.CustomError)
+	DeleteSrvcFunc               func(ctx context.Context, menuID uuid.UUID) errUtility.CustomError
 }
 
 func (m *mockMenuService) GetAllMenusSrvc(ctx context.Context) ([]*models.MenuResponse, errUtility.CustomError) {
@@ -58,6 +59,13 @@ func (m *mockMenuService) AssignApiSrvc(ctx context.Context, menuID uuid.UUID, p
 		return m.AssignApiSrvcFunc(ctx, menuID, param)
 	}
 	return errUtility.CustomError{}
+}
+
+func (m *mockMenuService) GetAssignedEndpointsSrvc(ctx context.Context, menuID uuid.UUID) ([]models.MenuApiResponse, errUtility.CustomError) {
+	if m.GetAssignedEndpointsSrvcFunc != nil {
+		return m.GetAssignedEndpointsSrvcFunc(ctx, menuID)
+	}
+	return []models.MenuApiResponse{}, errUtility.CustomError{}
 }
 
 func (m *mockMenuService) DeleteSrvc(ctx context.Context, menuID uuid.UUID) errUtility.CustomError {
@@ -126,6 +134,47 @@ func TestAssignApiCtrl(t *testing.T) {
 			ctrl.assignApiCtrl(w, newRequest(menuID.String(), `{"listID":["`+apiID.String()+`"]}`))
 			if w.Code != int(errObj.Code) {
 				t.Errorf("expected status %d, got %d", errObj.Code, w.Code)
+			}
+		}
+	})
+}
+
+func TestListAssignedEndpointCtrl(t *testing.T) {
+	menuID := uuid.New()
+	newRequest := func(value string) *http.Request {
+		req := httptest.NewRequest(http.MethodGet, "/api/menu/list-assigned-endpoint/"+value, nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("menuID", value)
+		return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	}
+	t.Run("should return assigned endpoint statuses", func(t *testing.T) {
+		ctrl := menuController{service: &mockMenuService{GetAssignedEndpointsSrvcFunc: func(ctx context.Context, id uuid.UUID) ([]models.MenuApiResponse, errUtility.CustomError) {
+			return []models.MenuApiResponse{{Id: uuid.New(), Name: "List users", Path: "/api/users", Method: "GET", Status: 1}}, errUtility.CustomError{}
+		}}}
+		w := httptest.NewRecorder()
+		ctrl.listAssignedEndpointCtrl(w, newRequest(menuID.String()))
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"status":1`) {
+			t.Errorf("unexpected response: status=%d body=%s", w.Code, w.Body.String())
+		}
+	})
+	t.Run("should reject missing and invalid menuID", func(t *testing.T) {
+		for _, id := range []string{"", "invalid-id"} {
+			w := httptest.NewRecorder()
+			menuController{service: &mockMenuService{}}.listAssignedEndpointCtrl(w, newRequest(id))
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("expected 400, got %d", w.Code)
+			}
+		}
+	})
+	t.Run("should return service errors", func(t *testing.T) {
+		for _, errObj := range []errUtility.CustomError{{Code: http.StatusNotFound, MessageToSend: "Menu not found", Property: "menuID"}, {Code: http.StatusInternalServerError, Message: "db failure"}} {
+			ctrl := menuController{service: &mockMenuService{GetAssignedEndpointsSrvcFunc: func(ctx context.Context, id uuid.UUID) ([]models.MenuApiResponse, errUtility.CustomError) {
+				return nil, errObj
+			}}}
+			w := httptest.NewRecorder()
+			ctrl.listAssignedEndpointCtrl(w, newRequest(menuID.String()))
+			if w.Code != int(errObj.Code) {
+				t.Errorf("expected %d, got %d", errObj.Code, w.Code)
 			}
 		}
 	})

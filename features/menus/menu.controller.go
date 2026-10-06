@@ -27,11 +27,52 @@ type menuServiceInterface interface {
 	GetByIDSrvc(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError)
 	UpdateMenuSrvc(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError
 	AssignApiSrvc(ctx context.Context, menuID uuid.UUID, param models.AssignApiRequest) errUtility.CustomError
+	GetAssignedEndpointsSrvc(ctx context.Context, menuID uuid.UUID) ([]models.MenuApiResponse, errUtility.CustomError)
 	DeleteSrvc(ctx context.Context, menuID uuid.UUID) errUtility.CustomError
 }
 
 type menuController struct {
 	service menuServiceInterface
+}
+
+func (c menuController) listAssignedEndpointCtrl(w http.ResponseWriter, r *http.Request) {
+	reqID := utilities.GetReqID(r.Context())
+	path := r.URL.Path
+	menuIDStr := chi.URLParam(r, "menuID")
+	if menuIDStr == "" {
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{"message": "Validation failed", "errors": map[string][]string{"menuID": {"menuID path parameter is required"}}})
+		return
+	}
+	menuID, err := uuid.Parse(menuIDStr)
+	if err != nil {
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{"message": "Validation failed", "errors": map[string][]string{"menuID": {"Invalid menuID"}}})
+		return
+	}
+
+	data, errObj := c.service.GetAssignedEndpointsSrvc(r.Context(), menuID)
+	if errObj.Code > 0 {
+		errObj.Compile()
+		statusCode := int(errObj.Code)
+		logLevel := utilities.ERROR
+		if statusCode < http.StatusInternalServerError {
+			logLevel = utilities.WARN
+		}
+		utilities.Log(reqID, logLevel, path, "menuController.listAssignedEndpointCtrl", map[string]string{"menuID": menuIDStr}, "service execution failed", errObj)
+		if statusCode == http.StatusInternalServerError {
+			utilities.WriteJSON(w, statusCode, map[string]interface{}{"message": "Failed to get assigned endpoints", "errors": "Internal Server Error"})
+			return
+		}
+		errKey := errObj.Property
+		if errKey == "" {
+			errKey = "error"
+		}
+		utilities.WriteJSON(w, statusCode, map[string]interface{}{"message": "Failed to get assigned endpoints", "errors": map[string]string{errKey: errObj.MessageToSend}})
+		return
+	}
+	if data == nil {
+		data = []models.MenuApiResponse{}
+	}
+	utilities.WriteJSON(w, http.StatusOK, map[string]interface{}{"message": "Assigned endpoints retrieved successfully", "data": data})
 }
 
 func (c menuController) assignApiCtrl(w http.ResponseWriter, r *http.Request) {

@@ -12,12 +12,13 @@ import (
 )
 
 type mockMenuRepo struct {
-	GetAllFunc    func(ctx context.Context) ([]models.MenuResponse, errUtility.CustomError)
-	CreateFunc    func(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
-	UpdateFunc    func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError
-	AssignApiFunc func(ctx context.Context, menuID uuid.UUID, param models.AssignApiRequest) errUtility.CustomError
-	GetByIDFunc   func(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError)
-	DeleteFunc    func(ctx context.Context, menuID uuid.UUID) errUtility.CustomError
+	GetAllFunc               func(ctx context.Context) ([]models.MenuResponse, errUtility.CustomError)
+	CreateFunc               func(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
+	UpdateFunc               func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError
+	AssignApiFunc            func(ctx context.Context, menuID uuid.UUID, param models.AssignApiRequest) errUtility.CustomError
+	GetAssignedEndpointsFunc func(ctx context.Context, menuID uuid.UUID) ([]models.MenuApiResponse, errUtility.CustomError)
+	GetByIDFunc              func(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError)
+	DeleteFunc               func(ctx context.Context, menuID uuid.UUID) errUtility.CustomError
 }
 
 func (m *mockMenuRepo) GetAll(ctx context.Context) ([]models.MenuResponse, errUtility.CustomError) {
@@ -46,6 +47,36 @@ func (m *mockMenuRepo) AssignApi(ctx context.Context, menuID uuid.UUID, param mo
 		return m.AssignApiFunc(ctx, menuID, param)
 	}
 	return errUtility.CustomError{}
+}
+
+func (m *mockMenuRepo) GetAssignedEndpoints(ctx context.Context, menuID uuid.UUID) ([]models.MenuApiResponse, errUtility.CustomError) {
+	if m.GetAssignedEndpointsFunc != nil {
+		return m.GetAssignedEndpointsFunc(ctx, menuID)
+	}
+	return []models.MenuApiResponse{}, errUtility.CustomError{}
+}
+
+func TestGetAssignedEndpointsSrvc(t *testing.T) {
+	ctx, menuID := context.Background(), uuid.New()
+	t.Run("should return repository data", func(t *testing.T) {
+		expected := []models.MenuApiResponse{{Id: uuid.New(), Name: "List users", Status: 1}}
+		srv := menuService{repo: &mockMenuRepo{GetAssignedEndpointsFunc: func(ctx context.Context, id uuid.UUID) ([]models.MenuApiResponse, errUtility.CustomError) {
+			return expected, errUtility.CustomError{}
+		}}}
+		data, errObj := srv.GetAssignedEndpointsSrvc(ctx, menuID)
+		if errObj.Code != 0 || len(data) != 1 || data[0].Status != 1 {
+			t.Errorf("unexpected result: %+v, %+v", data, errObj)
+		}
+	})
+	t.Run("should return repository error", func(t *testing.T) {
+		srv := menuService{repo: &mockMenuRepo{GetAssignedEndpointsFunc: func(ctx context.Context, id uuid.UUID) ([]models.MenuApiResponse, errUtility.CustomError) {
+			return nil, errUtility.CustomError{Code: http.StatusNotFound}
+		}}}
+		_, errObj := srv.GetAssignedEndpointsSrvc(ctx, menuID)
+		if errObj.Code != http.StatusNotFound {
+			t.Errorf("expected 404, got %d", errObj.Code)
+		}
+	})
 }
 
 func TestAssignApiSrvc(t *testing.T) {

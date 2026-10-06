@@ -175,6 +175,52 @@ func (r MenuPostgresRepo) AssignApi(ctx context.Context, menuID uuid.UUID, param
 	return errUtility.CustomError{}
 }
 
+func (r MenuPostgresRepo) GetAssignedEndpoints(ctx context.Context, menuID uuid.UUID) ([]models.MenuApiResponse, errUtility.CustomError) {
+	db := connections.DbPostgres()
+	var existingMenuID uuid.UUID
+	if err := db.QueryRowContext(ctx, "SELECT id FROM menus WHERE id = $1;", menuID).Scan(&existingMenuID); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, errUtility.CustomError{Code: http.StatusNotFound, Message: "menu not found", MessageToSend: "Menu not found", Property: "menuID", Function: "MenuPostgresRepo.GetAssignedEndpoints"}
+		}
+		return nil, errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed to get assigned endpoints", Function: "MenuPostgresRepo.GetAssignedEndpoints"}
+	}
+
+	query := `
+		SELECT a.id, a.name, a.description, a.path, a.method, a.created_at, a.updated_at,
+			CASE WHEN ma.menu_id IS NOT NULL THEN 1 ELSE 0 END AS status
+		FROM apis a
+		LEFT JOIN menu_api ma ON ma.api_id = a.id AND ma.menu_id = $1
+		ORDER BY a.created_at ASC;`
+	rows, err := db.QueryContext(ctx, query, menuID)
+	if err != nil {
+		return nil, errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed to get assigned endpoints", Function: "MenuPostgresRepo.GetAssignedEndpoints"}
+	}
+	defer rows.Close()
+
+	data := []models.MenuApiResponse{}
+	for rows.Next() {
+		var item models.MenuApiResponse
+		var description, createdAt, updatedAt sql.NullString
+		if err := rows.Scan(&item.Id, &item.Name, &description, &item.Path, &item.Method, &createdAt, &updatedAt, &item.Status); err != nil {
+			return nil, errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed to get assigned endpoints", Function: "MenuPostgresRepo.GetAssignedEndpoints"}
+		}
+		if description.Valid {
+			item.Description = description.String
+		}
+		if createdAt.Valid {
+			item.CreatedAt = createdAt.String
+		}
+		if updatedAt.Valid {
+			item.UpdatedAt = updatedAt.String
+		}
+		data = append(data, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed to get assigned endpoints", Function: "MenuPostgresRepo.GetAssignedEndpoints"}
+	}
+	return data, errUtility.CustomError{}
+}
+
 func (r MenuPostgresRepo) GetByID(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError) {
 	db := connections.DbPostgres()
 	var data models.MenuResponse
