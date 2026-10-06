@@ -21,6 +21,7 @@ type mockMenuService struct {
 	CreateMenuSrvcFunc  func(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
 	GetByIDSrvcFunc     func(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError)
 	UpdateMenuSrvcFunc  func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError
+	AssignApiSrvcFunc   func(ctx context.Context, menuID uuid.UUID, param models.AssignApiRequest) errUtility.CustomError
 	DeleteSrvcFunc      func(ctx context.Context, menuID uuid.UUID) errUtility.CustomError
 }
 
@@ -52,6 +53,13 @@ func (m *mockMenuService) UpdateMenuSrvc(ctx context.Context, param models.Updat
 	return errUtility.CustomError{}
 }
 
+func (m *mockMenuService) AssignApiSrvc(ctx context.Context, menuID uuid.UUID, param models.AssignApiRequest) errUtility.CustomError {
+	if m.AssignApiSrvcFunc != nil {
+		return m.AssignApiSrvcFunc(ctx, menuID, param)
+	}
+	return errUtility.CustomError{}
+}
+
 func (m *mockMenuService) DeleteSrvc(ctx context.Context, menuID uuid.UUID) errUtility.CustomError {
 	if m.DeleteSrvcFunc != nil {
 		return m.DeleteSrvcFunc(ctx, menuID)
@@ -59,6 +67,69 @@ func (m *mockMenuService) DeleteSrvc(ctx context.Context, menuID uuid.UUID) errU
 	return errUtility.CustomError{}
 }
 
+func TestAssignApiCtrl(t *testing.T) {
+	menuID := uuid.New()
+	apiID := uuid.New()
+	newRequest := func(menuIDParam, body string) *http.Request {
+		req := httptest.NewRequest(http.MethodPut, "/api/menu/assign-api/"+menuIDParam, strings.NewReader(body))
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("menuID", menuIDParam)
+		return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	}
+
+	t.Run("should assign multiple APIs successfully", func(t *testing.T) {
+		secondAPIID := uuid.New()
+		var capturedMenuID uuid.UUID
+		var capturedParam models.AssignApiRequest
+		ctrl := menuController{service: &mockMenuService{AssignApiSrvcFunc: func(ctx context.Context, id uuid.UUID, param models.AssignApiRequest) errUtility.CustomError {
+			capturedMenuID, capturedParam = id, param
+			return errUtility.CustomError{}
+		}}}
+		w := httptest.NewRecorder()
+		ctrl.assignApiCtrl(w, newRequest(menuID.String(), `{"listID":["`+apiID.String()+`","`+secondAPIID.String()+`"]}`))
+		if w.Code != http.StatusCreated || capturedMenuID != menuID || len(capturedParam.ApiIDs) != 2 {
+			t.Errorf("unexpected result: status=%d menuID=%s param=%+v", w.Code, capturedMenuID, capturedParam)
+		}
+	})
+
+	t.Run("should reject missing or invalid menuID", func(t *testing.T) {
+		for _, id := range []string{"", "invalid-id"} {
+			ctrl := menuController{service: &mockMenuService{}}
+			w := httptest.NewRecorder()
+			ctrl.assignApiCtrl(w, newRequest(id, `{"listID":["`+apiID.String()+`"]}`))
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("expected status 400 for %q, got %d", id, w.Code)
+			}
+		}
+	})
+
+	t.Run("should reject invalid JSON and invalid payload", func(t *testing.T) {
+		for _, body := range []string{`{"listID":`, `{}`} {
+			ctrl := menuController{service: &mockMenuService{}}
+			w := httptest.NewRecorder()
+			ctrl.assignApiCtrl(w, newRequest(menuID.String(), body))
+			if body == `{}` && w.Code != http.StatusUnprocessableEntity || body != `{}` && w.Code != http.StatusBadRequest {
+				t.Errorf("unexpected status %d for body %s", w.Code, body)
+			}
+		}
+	})
+
+	t.Run("should return service not-found and internal errors", func(t *testing.T) {
+		for _, errObj := range []errUtility.CustomError{
+			{Code: http.StatusNotFound, MessageToSend: "Menu not found", Property: "menuID"},
+			{Code: http.StatusInternalServerError, Message: "database unavailable"},
+		} {
+			ctrl := menuController{service: &mockMenuService{AssignApiSrvcFunc: func(ctx context.Context, id uuid.UUID, param models.AssignApiRequest) errUtility.CustomError {
+				return errObj
+			}}}
+			w := httptest.NewRecorder()
+			ctrl.assignApiCtrl(w, newRequest(menuID.String(), `{"listID":["`+apiID.String()+`"]}`))
+			if w.Code != int(errObj.Code) {
+				t.Errorf("expected status %d, got %d", errObj.Code, w.Code)
+			}
+		}
+	})
+}
 
 func TestGetAllMenusCtrl(t *testing.T) {
 	t.Run("should return 500 when service fails", func(t *testing.T) {
@@ -705,6 +776,3 @@ func TestDeleteCtrl(t *testing.T) {
 		}
 	})
 }
-
-
-

@@ -13,10 +13,10 @@ type menuPostgresRepoInterface interface {
 	GetAll(ctx context.Context) ([]models.MenuResponse, errUtility.CustomError)
 	Create(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
 	Update(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError
+	AssignApi(ctx context.Context, menuID uuid.UUID, param models.AssignApiRequest) errUtility.CustomError
 	GetByID(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError)
 	Delete(ctx context.Context, menuID uuid.UUID) errUtility.CustomError
 }
-
 
 type menuService struct {
 	repo menuPostgresRepoInterface
@@ -84,6 +84,10 @@ func (s menuService) GetByIDSrvc(ctx context.Context, menuID uuid.UUID) (models.
 
 func (s menuService) UpdateMenuSrvc(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError {
 	return s.repo.Update(ctx, param)
+}
+
+func (s menuService) AssignApiSrvc(ctx context.Context, menuID uuid.UUID, param models.AssignApiRequest) errUtility.CustomError {
+	return s.repo.AssignApi(ctx, menuID, param)
 }
 
 func (s menuService) DeleteSrvc(ctx context.Context, menuID uuid.UUID) errUtility.CustomError {

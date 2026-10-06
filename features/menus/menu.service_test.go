@@ -12,11 +12,12 @@ import (
 )
 
 type mockMenuRepo struct {
-	GetAllFunc  func(ctx context.Context) ([]models.MenuResponse, errUtility.CustomError)
-	CreateFunc  func(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
-	UpdateFunc  func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError
-	GetByIDFunc func(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError)
-	DeleteFunc  func(ctx context.Context, menuID uuid.UUID) errUtility.CustomError
+	GetAllFunc    func(ctx context.Context) ([]models.MenuResponse, errUtility.CustomError)
+	CreateFunc    func(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
+	UpdateFunc    func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError
+	AssignApiFunc func(ctx context.Context, menuID uuid.UUID, param models.AssignApiRequest) errUtility.CustomError
+	GetByIDFunc   func(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError)
+	DeleteFunc    func(ctx context.Context, menuID uuid.UUID) errUtility.CustomError
 }
 
 func (m *mockMenuRepo) GetAll(ctx context.Context) ([]models.MenuResponse, errUtility.CustomError) {
@@ -40,6 +41,38 @@ func (m *mockMenuRepo) Update(ctx context.Context, param models.UpdateMenuReques
 	return errUtility.CustomError{}
 }
 
+func (m *mockMenuRepo) AssignApi(ctx context.Context, menuID uuid.UUID, param models.AssignApiRequest) errUtility.CustomError {
+	if m.AssignApiFunc != nil {
+		return m.AssignApiFunc(ctx, menuID, param)
+	}
+	return errUtility.CustomError{}
+}
+
+func TestAssignApiSrvc(t *testing.T) {
+	ctx := context.Background()
+	menuID, apiID := uuid.New(), uuid.New()
+	req := models.AssignApiRequest{ApiIDs: []uuid.UUID{apiID}}
+	t.Run("should pass menu and API IDs to repository", func(t *testing.T) {
+		var capturedMenuID uuid.UUID
+		var capturedParam models.AssignApiRequest
+		srv := menuService{repo: &mockMenuRepo{AssignApiFunc: func(ctx context.Context, id uuid.UUID, param models.AssignApiRequest) errUtility.CustomError {
+			capturedMenuID, capturedParam = id, param
+			return errUtility.CustomError{}
+		}}}
+		if errObj := srv.AssignApiSrvc(ctx, menuID, req); errObj.Code != 0 || capturedMenuID != menuID || len(capturedParam.ApiIDs) != 1 {
+			t.Errorf("unexpected assignment result: error=%+v menuID=%s param=%+v", errObj, capturedMenuID, capturedParam)
+		}
+	})
+	t.Run("should return repository error", func(t *testing.T) {
+		srv := menuService{repo: &mockMenuRepo{AssignApiFunc: func(ctx context.Context, id uuid.UUID, param models.AssignApiRequest) errUtility.CustomError {
+			return errUtility.CustomError{Code: http.StatusBadRequest, MessageToSend: "API does not exist", Property: "listID"}
+		}}}
+		if errObj := srv.AssignApiSrvc(ctx, menuID, req); errObj.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", errObj.Code)
+		}
+	})
+}
+
 func (m *mockMenuRepo) GetByID(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError) {
 	if m.GetByIDFunc != nil {
 		return m.GetByIDFunc(ctx, menuID)
@@ -53,7 +86,6 @@ func (m *mockMenuRepo) Delete(ctx context.Context, menuID uuid.UUID) errUtility.
 	}
 	return errUtility.CustomError{}
 }
-
 
 func TestBuildMenuTree(t *testing.T) {
 	t.Run("should return empty slice when input is empty", func(t *testing.T) {
@@ -609,6 +641,3 @@ func TestDeleteSrvc(t *testing.T) {
 		}
 	})
 }
-
-
-

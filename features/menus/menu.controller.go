@@ -26,11 +26,82 @@ type menuServiceInterface interface {
 	CreateMenuSrvc(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
 	GetByIDSrvc(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError)
 	UpdateMenuSrvc(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError
+	AssignApiSrvc(ctx context.Context, menuID uuid.UUID, param models.AssignApiRequest) errUtility.CustomError
 	DeleteSrvc(ctx context.Context, menuID uuid.UUID) errUtility.CustomError
 }
 
 type menuController struct {
 	service menuServiceInterface
+}
+
+func (c menuController) assignApiCtrl(w http.ResponseWriter, r *http.Request) {
+	reqID := utilities.GetReqID(r.Context())
+	path := r.URL.Path
+	menuIDStr := chi.URLParam(r, "menuID")
+	if menuIDStr == "" {
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors":  map[string][]string{"menuID": {"menuID path parameter is required"}},
+		})
+		return
+	}
+
+	menuID, err := uuid.Parse(menuIDStr)
+	if err != nil {
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors":  map[string][]string{"menuID": {"Invalid menuID"}},
+		})
+		return
+	}
+
+	var reqBody models.AssignApiRequest
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		utilities.Log(reqID, utilities.ERROR, path, "menuController.assignApiCtrl", nil, "json decode failed", err)
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors":  map[string][]string{"data": {"Invalid data"}},
+		})
+		return
+	}
+	if err := validate.Struct(reqBody); err != nil {
+		errMap := errUtility.ParseError(err)
+		utilities.Log(reqID, utilities.WARN, path, "menuController.assignApiCtrl", reqBody, "validation failed", errMap)
+		utilities.WriteJSON(w, http.StatusUnprocessableEntity, map[string]interface{}{
+			"message": "Validation failed",
+			"errors":  errMap,
+		})
+		return
+	}
+
+	if errObj := c.service.AssignApiSrvc(r.Context(), menuID, reqBody); errObj.Code > 0 {
+		errObj.Compile()
+		statusCode := int(errObj.Code)
+		logLevel := utilities.ERROR
+		if statusCode < http.StatusInternalServerError {
+			logLevel = utilities.WARN
+		}
+		utilities.Log(reqID, logLevel, path, "menuController.assignApiCtrl", reqBody, "service execution failed", errObj)
+		if statusCode == http.StatusInternalServerError {
+			utilities.WriteJSON(w, statusCode, map[string]interface{}{
+				"message": "Failed to assign API",
+				"errors":  "Internal Server Error",
+			})
+			return
+		}
+		errKey := errObj.Property
+		if errKey == "" {
+			errKey = "error"
+		}
+		utilities.WriteJSON(w, statusCode, map[string]interface{}{
+			"message": "Failed to assign API",
+			"errors":  map[string]string{errKey: errObj.MessageToSend},
+		})
+		return
+	}
+
+	utilities.Log(reqID, utilities.DEBUG, path, "menuController.assignApiCtrl", nil, "success", nil)
+	utilities.WriteJSON(w, http.StatusCreated, map[string]string{"message": "List API assigned successfully"})
 }
 
 func (c menuController) GetByIDCtrl(w http.ResponseWriter, r *http.Request) {

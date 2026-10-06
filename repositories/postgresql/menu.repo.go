@@ -3,6 +3,7 @@ package postgresql
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -112,6 +113,64 @@ func (r MenuPostgresRepo) Create(ctx context.Context, param models.CreateMenuReq
 			MessageToSend: "Failed create menu",
 			Function:      "MenuPostgresRepo.Create",
 		}
+	}
+	return errUtility.CustomError{}
+}
+
+func (r MenuPostgresRepo) AssignApi(ctx context.Context, menuID uuid.UUID, param models.AssignApiRequest) errUtility.CustomError {
+	db := connections.DbPostgres()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed to assign API", Function: "MenuPostgresRepo.AssignApi"}
+	}
+	defer tx.Rollback()
+
+	var existingMenuID uuid.UUID
+	if err = tx.QueryRowContext(ctx, "SELECT id FROM menus WHERE id = $1;", menuID).Scan(&existingMenuID); err != nil {
+		if err == sql.ErrNoRows {
+			return errUtility.CustomError{Code: http.StatusNotFound, Message: "menu not found", MessageToSend: "Menu not found", Property: "menuID", Function: "MenuPostgresRepo.AssignApi"}
+		}
+		return errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed to assign API", Function: "MenuPostgresRepo.AssignApi"}
+	}
+
+	uniqueAPIIDs := make([]uuid.UUID, 0, len(param.ApiIDs))
+	seen := make(map[uuid.UUID]bool)
+	for _, apiID := range param.ApiIDs {
+		if apiID == uuid.Nil {
+			return errUtility.CustomError{Code: http.StatusBadRequest, Message: "invalid api id", MessageToSend: "Invalid API ID", Property: "listID", Function: "MenuPostgresRepo.AssignApi"}
+		}
+		if !seen[apiID] {
+			seen[apiID] = true
+			uniqueAPIIDs = append(uniqueAPIIDs, apiID)
+		}
+	}
+
+	for _, apiID := range uniqueAPIIDs {
+		var existingAPIID uuid.UUID
+		if err = tx.QueryRowContext(ctx, "SELECT id FROM apis WHERE id = $1;", apiID).Scan(&existingAPIID); err != nil {
+			if err == sql.ErrNoRows {
+				return errUtility.CustomError{Code: http.StatusBadRequest, Message: "api not found", MessageToSend: fmt.Sprintf("API with ID %s does not exist", apiID.String()), Property: "listID", Function: "MenuPostgresRepo.AssignApi"}
+			}
+			return errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed to assign API", Function: "MenuPostgresRepo.AssignApi"}
+		}
+	}
+
+	if _, err = tx.ExecContext(ctx, "DELETE FROM menu_api WHERE menu_id = $1;", menuID); err != nil {
+		return errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed to assign API", Function: "MenuPostgresRepo.AssignApi"}
+	}
+
+	for _, apiID := range uniqueAPIIDs {
+		id, uuidErr := uuid.NewV7()
+		if uuidErr != nil {
+			return errUtility.CustomError{Code: http.StatusInternalServerError, Message: uuidErr.Error(), MessageToSend: "Failed to assign API", Function: "MenuPostgresRepo.AssignApi"}
+		}
+		if _, err = tx.ExecContext(ctx, "INSERT INTO menu_api (id, menu_id, api_id) VALUES ($1, $2, $3) ON CONFLICT (menu_id, api_id) DO NOTHING;", id, menuID, apiID); err != nil {
+			return errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed to assign API", Function: "MenuPostgresRepo.AssignApi"}
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed to assign API", Function: "MenuPostgresRepo.AssignApi"}
 	}
 	return errUtility.CustomError{}
 }
@@ -278,4 +337,3 @@ func FactoryMenuRepo() MenuPostgresRepo {
 	}
 	return menuRepo
 }
-

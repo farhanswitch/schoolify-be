@@ -18,6 +18,10 @@ type UpdateMenuRequest struct {
 	Description string    `json:"description" validate:"required,gte=3,lte=100"`
 }
 
+type AssignApiRequest struct {
+	ApiIDs uuid.UUIDs `json:"listID" validate:"required,dive,required"`
+}
+
 type MenuResponse struct {
 	Id          string          `json:"id"`
 	ParentId    *string         `json:"parentId"`
