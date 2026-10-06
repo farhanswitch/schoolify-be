@@ -135,7 +135,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 
 		// 3. Automatic session refresh mechanism
 		remainingTime := expiryUnix - time.Now().Unix()
-		refreshThreshold := int64(cfg.Service.RefreshTime) * 60
+		refreshThreshold := int64(cfg.Service.RefreshTime)
 
 		// Only trigger refresh if the request token is the primary one in key1
 		// to avoid redundant/overlapping refreshes from key2 requests.
@@ -149,18 +149,18 @@ func AuthMiddleware(next http.Handler) http.Handler {
 			}
 
 			// Generate new JWE token with the same claims but updated Expiry and IssuedAt
-			sessionMinutes := cfg.Service.SessionTime
-			if sessionMinutes <= 0 {
-				sessionMinutes = 60
+			sessionSeconds := cfg.Service.SessionTime
+			if sessionSeconds <= 0 {
+				sessionSeconds = 3600
 			}
-			newExpiry := time.Now().Add(time.Duration(sessionMinutes) * time.Minute)
+			newExpiry := time.Now().Add(time.Duration(sessionSeconds) * time.Second)
 			claims["Expiry"] = newExpiry.Unix()
 			claims["IssuedAt"] = time.Now().Unix()
 
 			newToken, encryptErr := Encrypt(claims, []byte(cfg.Service.EncryptKey))
 			if encryptErr == nil {
-				// Save new JWE to key1 with full TTL (SESSION_TIME)
-				newTTL := time.Duration(sessionMinutes) * time.Minute
+				// Save new JWE to key1 with the full SESSION_TIME TTL.
+				newTTL := time.Duration(sessionSeconds) * time.Second
 				saveErr := RedisInstance().SaveValue(r.Context(), redisKey1, newToken, newTTL)
 				if saveErr == nil {
 					// Set response header "xrfs-token" to newToken
