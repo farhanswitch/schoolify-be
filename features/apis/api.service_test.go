@@ -13,6 +13,7 @@ import (
 
 type mockApiPostgresRepo struct {
 	GetAllFunc func(ctx context.Context, param models.GetAllApiRequest) ([]models.ApiResponse, int, errUtility.CustomError)
+	CreateFunc func(ctx context.Context, param models.CreateApiRequest) errUtility.CustomError
 }
 
 func (m *mockApiPostgresRepo) GetAll(ctx context.Context, param models.GetAllApiRequest) ([]models.ApiResponse, int, errUtility.CustomError) {
@@ -20,6 +21,75 @@ func (m *mockApiPostgresRepo) GetAll(ctx context.Context, param models.GetAllApi
 		return m.GetAllFunc(ctx, param)
 	}
 	return []models.ApiResponse{}, 0, errUtility.CustomError{}
+}
+
+func (m *mockApiPostgresRepo) Create(ctx context.Context, param models.CreateApiRequest) errUtility.CustomError {
+	if m.CreateFunc != nil {
+		return m.CreateFunc(ctx, param)
+	}
+	return errUtility.CustomError{}
+}
+
+func TestCreateApiSrvc(t *testing.T) {
+	ctx := context.Background()
+	req := models.CreateApiRequest{
+		Name:        "Create user",
+		Description: "Creates a new user account",
+		Path:        "/api/users",
+		Method:      "POST",
+	}
+
+	t.Run("should generate UUIDv7 and pass request to repository", func(t *testing.T) {
+		var captured models.CreateApiRequest
+		srv := apiService{repo: &mockApiPostgresRepo{
+			CreateFunc: func(ctx context.Context, param models.CreateApiRequest) errUtility.CustomError {
+				captured = param
+				return errUtility.CustomError{}
+			},
+		}}
+
+		errObj := srv.CreateApiSrvc(ctx, req)
+
+		if errObj.Code != 0 {
+			t.Fatalf("expected no error, got %+v", errObj)
+		}
+		if captured.Id == uuid.Nil || captured.Id.Version() != 7 {
+			t.Errorf("expected generated UUIDv7, got %s", captured.Id)
+		}
+		if captured.Name != req.Name || captured.Path != req.Path || captured.Method != req.Method {
+			t.Errorf("unexpected request passed to repository: %+v", captured)
+		}
+	})
+
+	t.Run("should preserve a supplied ID", func(t *testing.T) {
+		suppliedID := uuid.New()
+		var captured models.CreateApiRequest
+		srv := apiService{repo: &mockApiPostgresRepo{
+			CreateFunc: func(ctx context.Context, param models.CreateApiRequest) errUtility.CustomError {
+				captured = param
+				return errUtility.CustomError{}
+			},
+		}}
+
+		errObj := srv.CreateApiSrvc(ctx, models.CreateApiRequest{Id: suppliedID, Name: req.Name, Description: req.Description, Path: req.Path, Method: req.Method})
+
+		if errObj.Code != 0 || captured.Id != suppliedID {
+			t.Errorf("expected supplied ID %s to be preserved, got %s", suppliedID, captured.Id)
+		}
+	})
+
+	t.Run("should return repository error", func(t *testing.T) {
+		srv := apiService{repo: &mockApiPostgresRepo{
+			CreateFunc: func(ctx context.Context, param models.CreateApiRequest) errUtility.CustomError {
+				return errUtility.CustomError{Code: http.StatusConflict, MessageToSend: "API already exists"}
+			},
+		}}
+
+		errObj := srv.CreateApiSrvc(ctx, req)
+		if errObj.Code != http.StatusConflict {
+			t.Errorf("expected status 409, got %d", errObj.Code)
+		}
+	})
 }
 
 func TestGetAllSrvc(t *testing.T) {

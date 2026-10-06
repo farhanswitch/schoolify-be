@@ -2,6 +2,7 @@ package apis
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -21,10 +22,70 @@ func init() {
 
 type apiServiceInterface interface {
 	GetAllSrvc(ctx context.Context, param models.GetAllApiRequest) ([]models.ApiResponse, int, errUtility.CustomError)
+	CreateApiSrvc(ctx context.Context, param models.CreateApiRequest) errUtility.CustomError
 }
 
 type apiController struct {
 	service apiServiceInterface
+}
+
+func (c apiController) createCtrl(w http.ResponseWriter, r *http.Request) {
+	reqID := utilities.GetReqID(r.Context())
+	path := r.URL.Path
+
+	var reqBody models.CreateApiRequest
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		utilities.Log(reqID, utilities.ERROR, path, "apiController.createCtrl", nil, "json decode failed", err)
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors":  map[string][]string{"data": {"Invalid data"}},
+		})
+		return
+	}
+
+	utilities.Log(reqID, utilities.DEBUG, path, "apiController.createCtrl", reqBody, "incoming request", nil)
+	if err := validate.Struct(reqBody); err != nil {
+		errMap := errUtility.ParseError(err)
+		utilities.Log(reqID, utilities.WARN, path, "apiController.createCtrl", reqBody, "validation failed", errMap)
+		utilities.WriteJSON(w, http.StatusUnprocessableEntity, map[string]interface{}{
+			"message": "Validation failed",
+			"errors":  errMap,
+		})
+		return
+	}
+
+	if errObj := c.service.CreateApiSrvc(r.Context(), reqBody); errObj.Code > 0 {
+		errObj.Compile()
+		statusCode := int(errObj.Code)
+		logLevel := utilities.ERROR
+		if statusCode < http.StatusInternalServerError {
+			logLevel = utilities.WARN
+		}
+		utilities.Log(reqID, logLevel, path, "apiController.createCtrl", reqBody, "service execution failed", errObj)
+
+		if statusCode == http.StatusInternalServerError {
+			utilities.WriteJSON(w, statusCode, map[string]interface{}{
+				"message": "Failed to create API",
+				"errors":  "Internal Server Error",
+			})
+			return
+		}
+
+		errKey := errObj.Property
+		if errKey == "" {
+			errKey = "error"
+		}
+		utilities.WriteJSON(w, statusCode, map[string]interface{}{
+			"message": "Failed to create API",
+			"errors":  map[string]string{errKey: errObj.MessageToSend},
+		})
+		return
+	}
+
+	utilities.Log(reqID, utilities.DEBUG, path, "apiController.createCtrl", nil, "success", nil)
+	utilities.WriteJSON(w, http.StatusCreated, map[string]string{
+		"message": "API created successfully",
+	})
 }
 
 func (c apiController) getAllCtrl(w http.ResponseWriter, r *http.Request) {

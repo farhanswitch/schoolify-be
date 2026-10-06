@@ -12,5 +12,6 @@ func InitModule(router *chi.Mux) {
 	controller := factoryApiController(repo)
 
 	router.With(utilities.AuthMiddleware).Get("/api/endpoint/list", controller.getAllCtrl)
+	router.With(utilities.AuthMiddleware).Post("/api/endpoint", controller.createCtrl)
 
 }

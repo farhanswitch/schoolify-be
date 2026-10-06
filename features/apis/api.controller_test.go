@@ -14,7 +14,8 @@ import (
 )
 
 type mockApiService struct {
-	GetAllSrvcFunc func(ctx context.Context, param models.GetAllApiRequest) ([]models.ApiResponse, int, errUtility.CustomError)
+	GetAllSrvcFunc    func(ctx context.Context, param models.GetAllApiRequest) ([]models.ApiResponse, int, errUtility.CustomError)
+	CreateApiSrvcFunc func(ctx context.Context, param models.CreateApiRequest) errUtility.CustomError
 }
 
 func (m *mockApiService) GetAllSrvc(ctx context.Context, param models.GetAllApiRequest) ([]models.ApiResponse, int, errUtility.CustomError) {
@@ -22,6 +23,84 @@ func (m *mockApiService) GetAllSrvc(ctx context.Context, param models.GetAllApiR
 		return m.GetAllSrvcFunc(ctx, param)
 	}
 	return []models.ApiResponse{}, 0, errUtility.CustomError{}
+}
+
+func (m *mockApiService) CreateApiSrvc(ctx context.Context, param models.CreateApiRequest) errUtility.CustomError {
+	if m.CreateApiSrvcFunc != nil {
+		return m.CreateApiSrvcFunc(ctx, param)
+	}
+	return errUtility.CustomError{}
+}
+
+func TestCreateCtrl(t *testing.T) {
+	validBody := `{"name":"Create user","description":"Creates a new user account","path":"/api/users","method":"POST"}`
+
+	t.Run("should return 201 when API is created", func(t *testing.T) {
+		var captured models.CreateApiRequest
+		ctrl := apiController{service: &mockApiService{
+			CreateApiSrvcFunc: func(ctx context.Context, param models.CreateApiRequest) errUtility.CustomError {
+				captured = param
+				return errUtility.CustomError{}
+			},
+		}}
+		request := httptest.NewRequest(http.MethodPost, "/api/endpoint", strings.NewReader(validBody))
+		writer := httptest.NewRecorder()
+
+		ctrl.createCtrl(writer, request)
+
+		if writer.Code != http.StatusCreated {
+			t.Fatalf("expected status 201, got %d", writer.Code)
+		}
+		if captured.Name != "Create user" || captured.Path != "/api/users" || captured.Method != "POST" {
+			t.Errorf("unexpected request passed to service: %+v", captured)
+		}
+		if !strings.Contains(writer.Body.String(), "API created successfully") {
+			t.Errorf("expected success message, got %s", writer.Body.String())
+		}
+	})
+
+	t.Run("should return 400 for invalid JSON", func(t *testing.T) {
+		ctrl := apiController{service: &mockApiService{}}
+		request := httptest.NewRequest(http.MethodPost, "/api/endpoint", strings.NewReader(`{"name":`))
+		writer := httptest.NewRecorder()
+
+		ctrl.createCtrl(writer, request)
+
+		if writer.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", writer.Code)
+		}
+	})
+
+	t.Run("should return 422 for invalid request", func(t *testing.T) {
+		ctrl := apiController{service: &mockApiService{}}
+		request := httptest.NewRequest(http.MethodPost, "/api/endpoint", strings.NewReader(`{"name":"x","description":"test","path":"/api/users","method":"TRACE"}`))
+		writer := httptest.NewRecorder()
+
+		ctrl.createCtrl(writer, request)
+
+		if writer.Code != http.StatusUnprocessableEntity {
+			t.Errorf("expected status 422, got %d", writer.Code)
+		}
+	})
+
+	t.Run("should return service client error", func(t *testing.T) {
+		ctrl := apiController{service: &mockApiService{
+			CreateApiSrvcFunc: func(ctx context.Context, param models.CreateApiRequest) errUtility.CustomError {
+				return errUtility.CustomError{Code: http.StatusConflict, MessageToSend: "API already exists", Property: "id"}
+			},
+		}}
+		request := httptest.NewRequest(http.MethodPost, "/api/endpoint", strings.NewReader(validBody))
+		writer := httptest.NewRecorder()
+
+		ctrl.createCtrl(writer, request)
+
+		if writer.Code != http.StatusConflict {
+			t.Errorf("expected status 409, got %d", writer.Code)
+		}
+		if !strings.Contains(writer.Body.String(), "API already exists") {
+			t.Errorf("expected conflict response, got %s", writer.Body.String())
+		}
+	})
 }
 
 func TestGetAllCtrl(t *testing.T) {
