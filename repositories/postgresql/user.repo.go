@@ -17,7 +17,7 @@ var userRepo UserPostgresRepo
 func (UserPostgresRepo) GetUserByUsername(param models.UserLoginRequest) (models.User, errUtility.CustomError) {
 	var user models.User
 	var nullableUpdatedAt sql.NullTime
-	err := connections.DbPostgres().QueryRow("SELECT id, role_id, username, email, first_name, last_name, password, status, created, updated FROM public.users WHERE username=$1;", param.Username).Scan(&user.ID, &user.RoleID, &user.Username, &user.Email, &user.FirstName, &user.LastName, &user.Password, &user.Status, &user.Created, &nullableUpdatedAt)
+	err := connections.DbPostgres().QueryRow("SELECT id, role_id, username, email, first_name, last_name, password, status, created_at, updated_at FROM public.users WHERE username=$1;", param.Username).Scan(&user.ID, &user.RoleID, &user.Username, &user.Email, &user.FirstName, &user.LastName, &user.Password, &user.Status, &user.CreatedAt, &nullableUpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return models.User{}, errUtility.CustomError{
@@ -41,13 +41,13 @@ func (UserPostgresRepo) GetUserByUsername(param models.UserLoginRequest) (models
 			Function: "UserPostgresRepo.GetUserByUsername",
 		}
 	}
-	user.StrCreated = utility.FormatTimeMillis(user.Created)
+	user.StrCreatedAt = utility.FormatTimeMillis(user.CreatedAt)
 	if nullableUpdatedAt.Valid {
-		user.Updated = nullableUpdatedAt.Time
-		user.StrUpdated = utility.FormatTimeMillis(nullableUpdatedAt.Time)
+		user.UpdatedAt = nullableUpdatedAt.Time
+		user.StrUpdatedAt = utility.FormatTimeMillis(nullableUpdatedAt.Time)
 	} else {
-		user.Updated = user.Created
-		user.StrUpdated = utility.FormatTimeMillis(user.Created)
+		user.UpdatedAt = user.CreatedAt
+		user.StrUpdatedAt = utility.FormatTimeMillis(user.CreatedAt)
 	}
 	return user, errUtility.CustomError{}
 }
