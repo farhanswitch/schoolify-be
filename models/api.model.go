@@ -12,6 +12,13 @@ type CreateApiRequest struct {
 	Method      string    `json:"method" validate:"required,oneof=GET POST PUT DELETE PATCH,lte=10"`
 }
 
+type UpdateApiRequest struct {
+	Name        string `json:"name" validate:"required,gte=3,lte=50"`
+	Description string `json:"description" validate:"required,gte=3,lte=100"`
+	Path        string `json:"path" validate:"required,lte=255"`
+	Method      string `json:"method" validate:"required,oneof=GET POST PUT DELETE PATCH,lte=10"`
+}
+
 type GetAllApiRequest struct {
 	SortField string `json:"sortField"`
 	SortOrder string `json:"sortOrder" validate:"oneof=ASC DESC asc desc"`

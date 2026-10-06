@@ -13,5 +13,6 @@ func InitModule(router *chi.Mux) {
 
 	router.With(utilities.AuthMiddleware).Get("/api/endpoint/list", controller.getAllCtrl)
 	router.With(utilities.AuthMiddleware).Post("/api/endpoint", controller.createCtrl)
+	router.With(utilities.AuthMiddleware).Put("/api/endpoint/{apiID}", controller.updateCtrl)
 
 }

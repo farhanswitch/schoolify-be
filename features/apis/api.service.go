@@ -12,6 +12,7 @@ import (
 type apiPostgresRepoInterface interface {
 	GetAll(ctx context.Context, param models.GetAllApiRequest) ([]models.ApiResponse, int, errUtility.CustomError)
 	Create(ctx context.Context, param models.CreateApiRequest) errUtility.CustomError
+	Update(ctx context.Context, apiID uuid.UUID, param models.UpdateApiRequest) errUtility.CustomError
 }
 
 type apiService struct {
@@ -39,6 +40,10 @@ func (s apiService) CreateApiSrvc(ctx context.Context, param models.CreateApiReq
 	}
 
 	return s.repo.Create(ctx, param)
+}
+
+func (s apiService) UpdateApiSrvc(ctx context.Context, apiID uuid.UUID, param models.UpdateApiRequest) errUtility.CustomError {
+	return s.repo.Update(ctx, apiID, param)
 }
 func factoryApiService(repo apiPostgresRepoInterface) apiService {
 	if service.repo == nil {

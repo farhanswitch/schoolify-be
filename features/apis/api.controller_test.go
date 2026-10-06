@@ -10,12 +10,14 @@ import (
 	models "schoolify_be/models"
 	errUtility "schoolify_be/utilities/errors"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
 type mockApiService struct {
 	GetAllSrvcFunc    func(ctx context.Context, param models.GetAllApiRequest) ([]models.ApiResponse, int, errUtility.CustomError)
 	CreateApiSrvcFunc func(ctx context.Context, param models.CreateApiRequest) errUtility.CustomError
+	UpdateApiSrvcFunc func(ctx context.Context, apiID uuid.UUID, param models.UpdateApiRequest) errUtility.CustomError
 }
 
 func (m *mockApiService) GetAllSrvc(ctx context.Context, param models.GetAllApiRequest) ([]models.ApiResponse, int, errUtility.CustomError) {
@@ -30,6 +32,133 @@ func (m *mockApiService) CreateApiSrvc(ctx context.Context, param models.CreateA
 		return m.CreateApiSrvcFunc(ctx, param)
 	}
 	return errUtility.CustomError{}
+}
+
+func (m *mockApiService) UpdateApiSrvc(ctx context.Context, apiID uuid.UUID, param models.UpdateApiRequest) errUtility.CustomError {
+	if m.UpdateApiSrvcFunc != nil {
+		return m.UpdateApiSrvcFunc(ctx, apiID, param)
+	}
+	return errUtility.CustomError{}
+}
+
+func updateRequest(apiID, body string) *http.Request {
+	request := httptest.NewRequest(http.MethodPut, "/api/endpoint/"+apiID, strings.NewReader(body))
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("apiID", apiID)
+	return request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+}
+
+func TestUpdateCtrl(t *testing.T) {
+	apiID := uuid.New()
+	validBody := `{"name":"Update user","description":"Updates an existing user account","path":"/api/users/{id}","method":"PUT"}`
+
+	t.Run("should return 200 when API is updated", func(t *testing.T) {
+		var capturedID uuid.UUID
+		var capturedRequest models.UpdateApiRequest
+		ctrl := apiController{service: &mockApiService{
+			UpdateApiSrvcFunc: func(ctx context.Context, id uuid.UUID, param models.UpdateApiRequest) errUtility.CustomError {
+				capturedID = id
+				capturedRequest = param
+				return errUtility.CustomError{}
+			},
+		}}
+		writer := httptest.NewRecorder()
+
+		ctrl.updateCtrl(writer, updateRequest(apiID.String(), validBody))
+
+		if writer.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", writer.Code)
+		}
+		if capturedID != apiID || capturedRequest.Name != "Update user" || capturedRequest.Method != "PUT" {
+			t.Errorf("unexpected service parameters: id=%s request=%+v", capturedID, capturedRequest)
+		}
+		if !strings.Contains(writer.Body.String(), "API updated successfully") {
+			t.Errorf("expected success message, got %s", writer.Body.String())
+		}
+	})
+
+	t.Run("should return 400 when apiID is missing", func(t *testing.T) {
+		ctrl := apiController{service: &mockApiService{}}
+		writer := httptest.NewRecorder()
+
+		ctrl.updateCtrl(writer, updateRequest("", validBody))
+
+		if writer.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", writer.Code)
+		}
+	})
+
+	t.Run("should return 400 when apiID is invalid", func(t *testing.T) {
+		ctrl := apiController{service: &mockApiService{}}
+		writer := httptest.NewRecorder()
+
+		ctrl.updateCtrl(writer, updateRequest("invalid-id", validBody))
+
+		if writer.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", writer.Code)
+		}
+		if !strings.Contains(writer.Body.String(), "Invalid apiID") {
+			t.Errorf("expected invalid apiID error, got %s", writer.Body.String())
+		}
+	})
+
+	t.Run("should return 400 for invalid JSON", func(t *testing.T) {
+		ctrl := apiController{service: &mockApiService{}}
+		writer := httptest.NewRecorder()
+
+		ctrl.updateCtrl(writer, updateRequest(apiID.String(), `{"name":`))
+
+		if writer.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", writer.Code)
+		}
+	})
+
+	t.Run("should return 400 for an invalid request body", func(t *testing.T) {
+		ctrl := apiController{service: &mockApiService{}}
+		writer := httptest.NewRecorder()
+
+		ctrl.updateCtrl(writer, updateRequest(apiID.String(), `{"name":"x","description":"test","path":"","method":"TRACE"}`))
+
+		if writer.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", writer.Code)
+		}
+	})
+
+	t.Run("should return 404 when API does not exist", func(t *testing.T) {
+		ctrl := apiController{service: &mockApiService{
+			UpdateApiSrvcFunc: func(ctx context.Context, id uuid.UUID, param models.UpdateApiRequest) errUtility.CustomError {
+				return errUtility.CustomError{Code: http.StatusNotFound, MessageToSend: "API not found", Property: "apiID"}
+			},
+		}}
+		writer := httptest.NewRecorder()
+
+		ctrl.updateCtrl(writer, updateRequest(apiID.String(), validBody))
+
+		if writer.Code != http.StatusNotFound {
+			t.Errorf("expected status 404, got %d", writer.Code)
+		}
+		if !strings.Contains(writer.Body.String(), "API not found") {
+			t.Errorf("expected not-found error, got %s", writer.Body.String())
+		}
+	})
+
+	t.Run("should return 500 when service fails", func(t *testing.T) {
+		ctrl := apiController{service: &mockApiService{
+			UpdateApiSrvcFunc: func(ctx context.Context, id uuid.UUID, param models.UpdateApiRequest) errUtility.CustomError {
+				return errUtility.CustomError{Code: http.StatusInternalServerError, Message: "database unavailable"}
+			},
+		}}
+		writer := httptest.NewRecorder()
+
+		ctrl.updateCtrl(writer, updateRequest(apiID.String(), validBody))
+
+		if writer.Code != http.StatusInternalServerError {
+			t.Errorf("expected status 500, got %d", writer.Code)
+		}
+		if !strings.Contains(writer.Body.String(), "Internal Server Error") {
+			t.Errorf("expected generic internal error, got %s", writer.Body.String())
+		}
+	})
 }
 
 func TestCreateCtrl(t *testing.T) {

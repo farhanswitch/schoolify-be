@@ -14,6 +14,7 @@ import (
 type mockApiPostgresRepo struct {
 	GetAllFunc func(ctx context.Context, param models.GetAllApiRequest) ([]models.ApiResponse, int, errUtility.CustomError)
 	CreateFunc func(ctx context.Context, param models.CreateApiRequest) errUtility.CustomError
+	UpdateFunc func(ctx context.Context, apiID uuid.UUID, param models.UpdateApiRequest) errUtility.CustomError
 }
 
 func (m *mockApiPostgresRepo) GetAll(ctx context.Context, param models.GetAllApiRequest) ([]models.ApiResponse, int, errUtility.CustomError) {
@@ -28,6 +29,71 @@ func (m *mockApiPostgresRepo) Create(ctx context.Context, param models.CreateApi
 		return m.CreateFunc(ctx, param)
 	}
 	return errUtility.CustomError{}
+}
+
+func (m *mockApiPostgresRepo) Update(ctx context.Context, apiID uuid.UUID, param models.UpdateApiRequest) errUtility.CustomError {
+	if m.UpdateFunc != nil {
+		return m.UpdateFunc(ctx, apiID, param)
+	}
+	return errUtility.CustomError{}
+}
+
+func TestUpdateApiSrvc(t *testing.T) {
+	ctx := context.Background()
+	apiID := uuid.New()
+	req := models.UpdateApiRequest{
+		Name:        "Update user",
+		Description: "Updates an existing user account",
+		Path:        "/api/users/{id}",
+		Method:      "PUT",
+	}
+
+	t.Run("should pass ID and request to repository", func(t *testing.T) {
+		var capturedID uuid.UUID
+		var capturedRequest models.UpdateApiRequest
+		srv := apiService{repo: &mockApiPostgresRepo{
+			UpdateFunc: func(ctx context.Context, id uuid.UUID, param models.UpdateApiRequest) errUtility.CustomError {
+				capturedID = id
+				capturedRequest = param
+				return errUtility.CustomError{}
+			},
+		}}
+
+		errObj := srv.UpdateApiSrvc(ctx, apiID, req)
+
+		if errObj.Code != 0 {
+			t.Fatalf("expected no error, got %+v", errObj)
+		}
+		if capturedID != apiID || capturedRequest != req {
+			t.Errorf("unexpected repository parameters: id=%s request=%+v", capturedID, capturedRequest)
+		}
+	})
+
+	t.Run("should return repository not-found error", func(t *testing.T) {
+		srv := apiService{repo: &mockApiPostgresRepo{
+			UpdateFunc: func(ctx context.Context, id uuid.UUID, param models.UpdateApiRequest) errUtility.CustomError {
+				return errUtility.CustomError{Code: http.StatusNotFound, MessageToSend: "API not found", Property: "apiID"}
+			},
+		}}
+
+		errObj := srv.UpdateApiSrvc(ctx, apiID, req)
+		if errObj.Code != http.StatusNotFound || errObj.Property != "apiID" {
+			t.Errorf("expected not-found error for apiID, got %+v", errObj)
+		}
+	})
+
+	t.Run("should return repository internal error", func(t *testing.T) {
+		srv := apiService{repo: &mockApiPostgresRepo{
+			UpdateFunc: func(ctx context.Context, id uuid.UUID, param models.UpdateApiRequest) errUtility.CustomError {
+				return errUtility.CustomError{Code: http.StatusInternalServerError, MessageToSend: "Failed to update API"}
+			},
+		}}
+
+		errObj := srv.UpdateApiSrvc(ctx, apiID, req)
+		if errObj.Code != http.StatusInternalServerError {
+			t.Errorf("expected status 500, got %d", errObj.Code)
+		}
+	})
 }
 
 func TestCreateApiSrvc(t *testing.T) {

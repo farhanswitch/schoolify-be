@@ -215,6 +215,41 @@ func (r ApiPostgresRepo) Create(ctx context.Context, param models.CreateApiReque
 	return errUtility.CustomError{}
 }
 
+func (r ApiPostgresRepo) Update(ctx context.Context, apiID uuid.UUID, param models.UpdateApiRequest) errUtility.CustomError {
+	db := connections.DbPostgres()
+
+	query := "UPDATE apis SET name = $1, description = $2, path = $3, method = $4, updated_at = CURRENT_TIMESTAMP WHERE id = $5;"
+	result, err := db.ExecContext(ctx, query, param.Name, param.Description, param.Path, param.Method, apiID)
+	if err != nil {
+		return errUtility.CustomError{
+			Code:          http.StatusInternalServerError,
+			Message:       err.Error(),
+			MessageToSend: "Failed to update API",
+			Function:      "ApiPostgresRepo.Update",
+		}
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return errUtility.CustomError{
+			Code:          http.StatusInternalServerError,
+			Message:       err.Error(),
+			MessageToSend: "Failed to update API",
+			Function:      "ApiPostgresRepo.Update",
+		}
+	}
+	if rowsAffected == 0 {
+		return errUtility.CustomError{
+			Code:          http.StatusNotFound,
+			MessageToSend: "API not found",
+			Property:      "apiID",
+			Function:      "ApiPostgresRepo.Update",
+		}
+	}
+
+	return errUtility.CustomError{}
+}
+
 func (r ApiPostgresRepo) GetByID(ctx context.Context, apiID uuid.UUID) (models.ApiResponse, errUtility.CustomError) {
 	db := connections.DbPostgres()
 
@@ -277,9 +312,9 @@ func (r ApiPostgresRepo) Delete(ctx context.Context, apiID uuid.UUID) errUtility
 	rowsAffected, err := res.RowsAffected()
 	if err != nil {
 		return errUtility.CustomError{
-			Code:          http.StatusInternalServerError,
-			Message:       err.Error(),
-			Function:      "ApiPostgresRepo.Delete",
+			Code:     http.StatusInternalServerError,
+			Message:  err.Error(),
+			Function: "ApiPostgresRepo.Delete",
 		}
 	}
 	if rowsAffected == 0 {

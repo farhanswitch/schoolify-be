@@ -11,7 +11,9 @@ import (
 	utilities "schoolify_be/utilities"
 	errUtility "schoolify_be/utilities/errors"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 )
 
 var validate *validator.Validate
@@ -23,6 +25,7 @@ func init() {
 type apiServiceInterface interface {
 	GetAllSrvc(ctx context.Context, param models.GetAllApiRequest) ([]models.ApiResponse, int, errUtility.CustomError)
 	CreateApiSrvc(ctx context.Context, param models.CreateApiRequest) errUtility.CustomError
+	UpdateApiSrvc(ctx context.Context, apiID uuid.UUID, param models.UpdateApiRequest) errUtility.CustomError
 }
 
 type apiController struct {
@@ -85,6 +88,83 @@ func (c apiController) createCtrl(w http.ResponseWriter, r *http.Request) {
 	utilities.Log(reqID, utilities.DEBUG, path, "apiController.createCtrl", nil, "success", nil)
 	utilities.WriteJSON(w, http.StatusCreated, map[string]string{
 		"message": "API created successfully",
+	})
+}
+
+func (c apiController) updateCtrl(w http.ResponseWriter, r *http.Request) {
+	reqID := utilities.GetReqID(r.Context())
+	path := r.URL.Path
+	apiIDStr := chi.URLParam(r, "apiID")
+	if apiIDStr == "" {
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors":  map[string][]string{"apiID": {"apiID path parameter is required"}},
+		})
+		return
+	}
+
+	apiID, err := uuid.Parse(apiIDStr)
+	if err != nil {
+		utilities.Log(reqID, utilities.WARN, path, "apiController.updateCtrl", map[string]string{"apiID": apiIDStr}, "invalid apiID", err)
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors":  map[string][]string{"apiID": {"Invalid apiID"}},
+		})
+		return
+	}
+
+	var reqBody models.UpdateApiRequest
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		utilities.Log(reqID, utilities.ERROR, path, "apiController.updateCtrl", nil, "json decode failed", err)
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors":  map[string][]string{"data": {"Invalid data"}},
+		})
+		return
+	}
+
+	utilities.Log(reqID, utilities.DEBUG, path, "apiController.updateCtrl", reqBody, "incoming request", nil)
+	if err := validate.Struct(reqBody); err != nil {
+		errMap := errUtility.ParseError(err)
+		utilities.Log(reqID, utilities.WARN, path, "apiController.updateCtrl", reqBody, "validation failed", errMap)
+		utilities.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors":  errMap,
+		})
+		return
+	}
+
+	if errObj := c.service.UpdateApiSrvc(r.Context(), apiID, reqBody); errObj.Code > 0 {
+		errObj.Compile()
+		statusCode := int(errObj.Code)
+		logLevel := utilities.ERROR
+		if statusCode < http.StatusInternalServerError {
+			logLevel = utilities.WARN
+		}
+		utilities.Log(reqID, logLevel, path, "apiController.updateCtrl", reqBody, "service execution failed", errObj)
+
+		if statusCode == http.StatusInternalServerError {
+			utilities.WriteJSON(w, statusCode, map[string]interface{}{
+				"message": "Failed to update API",
+				"errors":  "Internal Server Error",
+			})
+			return
+		}
+
+		errKey := errObj.Property
+		if errKey == "" {
+			errKey = "error"
+		}
+		utilities.WriteJSON(w, statusCode, map[string]interface{}{
+			"message": "Failed to update API",
+			"errors":  map[string]string{errKey: errObj.MessageToSend},
+		})
+		return
+	}
+
+	utilities.Log(reqID, utilities.DEBUG, path, "apiController.updateCtrl", nil, "success", nil)
+	utilities.WriteJSON(w, http.StatusOK, map[string]string{
+		"message": "API updated successfully",
 	})
 }
 
