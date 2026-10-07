@@ -148,6 +148,24 @@ func (s userService) UserLogin(param models.UserLoginRequest) (map[string]any, e
 	return claims, errObj
 
 }
+
+func (s userService) LogoutSrvc(ctx context.Context, username string) errUtility.CustomError {
+	redisUtil := s.redis
+	if redisUtil == nil {
+		redisUtil = utilities.RedisInstance()
+	}
+
+	for _, key := range []string{fmt.Sprintf("TOKEN_%s_1", username), fmt.Sprintf("TOKEN_%s_2", username)} {
+		if err := redisUtil.DeleteValue(ctx, key); err != nil {
+			return errUtility.CustomError{
+				Code:          500,
+				Message:       err.Error(),
+				MessageToSend: "Failed to logout",
+			}
+		}
+	}
+	return errUtility.CustomError{}
+}
 func factoryUserService(repo userPostgresRepoInterface) userService {
 	if service.repo == nil {
 		service = userService{repo: repo, redis: utilities.RedisInstance()}

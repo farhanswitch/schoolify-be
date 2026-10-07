@@ -1,6 +1,7 @@
 package users
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,6 +19,23 @@ type userServiceInterface interface {
 	GetUserDataByUsernameSrvc(param models.UserLoginRequest) (models.User, errUtility.CustomError)
 	RegisterUserSrvc(param models.UserRegisterRequest) (bool, errUtility.CustomError)
 	UserLogin(param models.UserLoginRequest) (map[string]any, errUtility.CustomError)
+	LogoutSrvc(ctx context.Context, username string) errUtility.CustomError
+}
+
+func (c userController) LogoutCtrl(w http.ResponseWriter, r *http.Request) {
+	username := utilities.GetUsername(r.Context())
+	if username == "" {
+		utilities.WriteJSON(w, http.StatusUnauthorized, map[string]string{"message": "Unauthorized"})
+		return
+	}
+
+	if errObj := c.service.LogoutSrvc(r.Context(), username); errObj.Code > 0 {
+		utilities.Log(utilities.ERROR, r.URL.Path, "LogoutCtrl", username, "Logout failed: "+errObj.Message, errObj)
+		utilities.WriteJSON(w, http.StatusInternalServerError, map[string]string{"message": "Failed to logout"})
+		return
+	}
+
+	utilities.WriteJSON(w, http.StatusOK, map[string]string{"message": "Logout successful"})
 }
 
 type userController struct {

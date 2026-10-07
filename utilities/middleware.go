@@ -51,6 +51,7 @@ func GetReqID(ctx context.Context) string {
 const (
 	UserIDKey   contextKey = "userId"
 	UserRoleKey contextKey = "userRole"
+	UsernameKey contextKey = "username"
 )
 
 // AuthMiddleware extracts and validates the JWE token from the Authorization header,
@@ -182,9 +183,21 @@ func AuthMiddleware(next http.Handler) http.Handler {
 
 		ctx := context.WithValue(r.Context(), UserIDKey, userId)
 		ctx = context.WithValue(ctx, UserRoleKey, userRole)
+		ctx = context.WithValue(ctx, UsernameKey, username)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// GetUsername extracts the authenticated username from context.Context.
+func GetUsername(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if username, ok := ctx.Value(UsernameKey).(string); ok {
+		return username
+	}
+	return ""
 }
 
 // GetUserID extracts the authenticated user ID string from context.Context.

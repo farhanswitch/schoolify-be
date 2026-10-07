@@ -478,3 +478,34 @@ func TestUserLoginSrvc(t *testing.T) {
 	})
 }
 
+func TestLogoutSrvc(t *testing.T) {
+	ctx := context.Background()
+	t.Run("should delete both active session keys", func(t *testing.T) {
+		var deletedKeys []string
+		service := userService{redis: &mockRedisUtility{DeleteValueFunc: func(ctx context.Context, key string) error {
+			deletedKeys = append(deletedKeys, key)
+			return nil
+		}}}
+
+		errObj := service.LogoutSrvc(ctx, "johndoe")
+
+		if errObj.Code != 0 {
+			t.Fatalf("expected no error, got %+v", errObj)
+		}
+		if len(deletedKeys) != 2 || deletedKeys[0] != "TOKEN_johndoe_1" || deletedKeys[1] != "TOKEN_johndoe_2" {
+			t.Errorf("unexpected deleted keys: %v", deletedKeys)
+		}
+	})
+
+	t.Run("should return an error when Redis deletion fails", func(t *testing.T) {
+		service := userService{redis: &mockRedisUtility{DeleteValueFunc: func(ctx context.Context, key string) error {
+			return errors.New("redis unavailable")
+		}}}
+
+		errObj := service.LogoutSrvc(ctx, "johndoe")
+
+		if errObj.Code != http.StatusInternalServerError || errObj.MessageToSend != "Failed to logout" {
+			t.Errorf("unexpected error: %+v", errObj)
+		}
+	})
+}

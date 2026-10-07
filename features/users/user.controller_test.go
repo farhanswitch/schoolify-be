@@ -2,10 +2,12 @@ package users
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	models "schoolify_be/models"
+	"schoolify_be/utilities"
 	errUtility "schoolify_be/utilities/errors"
 	"strings"
 	"testing"
@@ -17,6 +19,7 @@ type mockUserService struct {
 	GetUserDataByUsernameSrvcFunc func(param models.UserLoginRequest) (models.User, errUtility.CustomError)
 	RegisterUserSrvcFunc          func(param models.UserRegisterRequest) (bool, errUtility.CustomError)
 	UserLoginFunc                 func(param models.UserLoginRequest) (map[string]any, errUtility.CustomError)
+	LogoutSrvcFunc                func(ctx context.Context, username string) errUtility.CustomError
 }
 
 func (m *mockUserService) GetUserDataByUsernameSrvc(param models.UserLoginRequest) (models.User, errUtility.CustomError) {
@@ -38,6 +41,62 @@ func (m *mockUserService) UserLogin(param models.UserLoginRequest) (map[string]a
 		return m.UserLoginFunc(param)
 	}
 	return map[string]any{}, errUtility.CustomError{}
+}
+
+func (m *mockUserService) LogoutSrvc(ctx context.Context, username string) errUtility.CustomError {
+	if m.LogoutSrvcFunc != nil {
+		return m.LogoutSrvcFunc(ctx, username)
+	}
+	return errUtility.CustomError{}
+}
+
+func TestLogoutCtrl(t *testing.T) {
+	t.Run("should return 401 when authenticated username is absent", func(t *testing.T) {
+		ctrl := userController{service: &mockUserService{}}
+		request := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+		writer := httptest.NewRecorder()
+
+		ctrl.LogoutCtrl(writer, request)
+
+		if writer.Code != http.StatusUnauthorized {
+			t.Errorf("expected status 401, got %d", writer.Code)
+		}
+	})
+
+	t.Run("should return 500 when Redis deletion fails", func(t *testing.T) {
+		ctrl := userController{service: &mockUserService{LogoutSrvcFunc: func(ctx context.Context, username string) errUtility.CustomError {
+			return errUtility.CustomError{Code: http.StatusInternalServerError, Message: "redis unavailable"}
+		}}}
+		request := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+		request = request.WithContext(context.WithValue(request.Context(), utilities.UsernameKey, "johndoe"))
+		writer := httptest.NewRecorder()
+
+		ctrl.LogoutCtrl(writer, request)
+
+		if writer.Code != http.StatusInternalServerError {
+			t.Errorf("expected status 500, got %d", writer.Code)
+		}
+	})
+
+	t.Run("should logout authenticated user", func(t *testing.T) {
+		var capturedUsername string
+		ctrl := userController{service: &mockUserService{LogoutSrvcFunc: func(ctx context.Context, username string) errUtility.CustomError {
+			capturedUsername = username
+			return errUtility.CustomError{}
+		}}}
+		request := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+		request = request.WithContext(context.WithValue(request.Context(), utilities.UsernameKey, "johndoe"))
+		writer := httptest.NewRecorder()
+
+		ctrl.LogoutCtrl(writer, request)
+
+		if writer.Code != http.StatusOK || capturedUsername != "johndoe" {
+			t.Errorf("unexpected result: status=%d username=%q", writer.Code, capturedUsername)
+		}
+		if !strings.Contains(writer.Body.String(), "Logout successful") {
+			t.Errorf("expected success message, got %s", writer.Body.String())
+		}
+	})
 }
 
 func TestPasswordValidation(t *testing.T) {
@@ -322,7 +381,7 @@ func TestRegisterUserCtrl(t *testing.T) {
 
 	t.Run("should return 400 Bad Request when service returns error", func(t *testing.T) {
 		serviceErrors := []struct {
-			name        string
+			name          string
 			messageToSend string
 		}{
 			{name: "duplicate username", messageToSend: "The username has already been taken."},
