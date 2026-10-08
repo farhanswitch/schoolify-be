@@ -37,9 +37,11 @@ type UserLoginRequest struct {
 }
 
 type UserLoginData struct {
-	ID       uuid.UUID `json:"id"`
-	Username string    `json:"username"`
-	Password string    `json:"password"`
-	RoleID   uuid.UUID `json:"roleID"`
-	RoleName string    `json:"roleName"`
+	ID        uuid.UUID `json:"id"`
+	Username  string    `json:"username"`
+	Password  string    `json:"password"`
+	RoleID    uuid.UUID `json:"roleID"`
+	RoleName  string    `json:"roleName"`
+	FirstName string    `json:"firstName"`
+	LastName  string    `json:"lastName"`
 }

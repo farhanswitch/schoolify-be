@@ -88,7 +88,7 @@ func (UserPostgresRepo) RegisterUser(user models.UserRegisterRequest) (bool, err
 	return false, errUtility.CustomError{}
 }
 func (UserPostgresRepo) UserLogin(user models.UserLoginRequest) (models.UserLoginData, errUtility.CustomError) {
-	result, err := connections.DbPostgres().Query("SELECT u.id, u.username, u.password, r.id AS roleID, r.name AS roleName FROM users AS u JOIN roles AS r ON u.role_id = r.id WHERE u.username = $1 LIMIT 1;", user.Username)
+	result, err := connections.DbPostgres().Query("SELECT u.id, u.username, u.password, r.id AS roleID, r.name AS roleName, COALESCE(u.first_name, ''), COALESCE(u.last_name, '') FROM users AS u JOIN roles AS r ON u.role_id = r.id WHERE u.username = $1 LIMIT 1;", user.Username)
 	if err != nil {
 		return models.UserLoginData{}, errUtility.CustomError{
 			Code:          http.StatusBadRequest,
@@ -99,7 +99,7 @@ func (UserPostgresRepo) UserLogin(user models.UserLoginRequest) (models.UserLogi
 
 	if result.Next() {
 		var data models.UserLoginData
-		err := result.Scan(&data.ID, &data.Username, &data.Password, &data.RoleID, &data.RoleName)
+		err := result.Scan(&data.ID, &data.Username, &data.Password, &data.RoleID, &data.RoleName, &data.FirstName, &data.LastName)
 		if err != nil {
 			return models.UserLoginData{}, errUtility.CustomError{
 				Code:          http.StatusBadRequest,

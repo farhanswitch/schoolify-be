@@ -144,6 +144,8 @@ func (s userService) UserLogin(param models.UserLoginRequest) (map[string]any, e
 			MessageToSend: "Invalid username or password"}
 	}
 	claims["token"] = strToken
+	claims["firstName"] = loginData.FirstName
+	claims["lastName"] = loginData.LastName
 
 	return claims, errObj
 

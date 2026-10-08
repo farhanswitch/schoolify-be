@@ -632,8 +632,10 @@ func TestUserLoginCtrl(t *testing.T) {
 	t.Run("should return 200 OK with token data when login succeeds", func(t *testing.T) {
 		serviceCalled := false
 		expectedData := map[string]any{
-			"username": "johndoe",
-			"token":    "sample.jwt.token",
+			"username":  "johndoe",
+			"firstName": "John",
+			"lastName":  "Doe",
+			"token":     "sample.jwt.token",
 		}
 		serviceMock := &mockUserService{
 			UserLoginFunc: func(param models.UserLoginRequest) (map[string]any, errUtility.CustomError) {
@@ -662,6 +664,9 @@ func TestUserLoginCtrl(t *testing.T) {
 		}
 		if !strings.Contains(w.Body.String(), `"token":"sample.jwt.token"`) {
 			t.Errorf("expected response to contain token, got %s", w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), `"firstName":"John"`) || !strings.Contains(w.Body.String(), `"lastName":"Doe"`) {
+			t.Errorf("expected response to contain firstName and lastName, got %s", w.Body.String())
 		}
 	})
 }

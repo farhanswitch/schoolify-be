@@ -288,11 +288,13 @@ func TestUserLoginSrvc(t *testing.T) {
 	mockRoleID := uuid.New()
 
 	validLoginData := models.UserLoginData{
-		ID:       mockID,
-		Username: "johndoe",
-		Password: string(hashedPassword),
-		RoleID:   mockRoleID,
-		RoleName: "Student",
+		ID:        mockID,
+		Username:  "johndoe",
+		Password:  string(hashedPassword),
+		RoleID:    mockRoleID,
+		RoleName:  "Student",
+		FirstName: "John",
+		LastName:  "Doe",
 	}
 
 	validRequest := models.UserLoginRequest{
@@ -332,6 +334,9 @@ func TestUserLoginSrvc(t *testing.T) {
 		}
 		if claims["roleName"] != "Student" {
 			t.Errorf("expected roleName 'Student', got %v", claims["roleName"])
+		}
+		if claims["firstName"] != "John" || claims["lastName"] != "Doe" {
+			t.Errorf("expected firstName and lastName in login response, got %v and %v", claims["firstName"], claims["lastName"])
 		}
 		if claims["token"] == nil || claims["token"] == "" {
 			t.Errorf("expected token in claims, got nil/empty")
