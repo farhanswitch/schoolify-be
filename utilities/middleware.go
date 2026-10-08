@@ -57,6 +57,16 @@ const (
 // AuthMiddleware extracts and validates the JWE token from the Authorization header,
 // checks the session in Redis, and automatically refreshes the token if it is close to expiring.
 func AuthMiddleware(next http.Handler) http.Handler {
+	return authMiddleware(next, false)
+}
+
+// LogoutAuthMiddleware accepts a valid encrypted token even after its expiry,
+// so the logout handler can revoke any remaining Redis session keys.
+func LogoutAuthMiddleware(next http.Handler) http.Handler {
+	return authMiddleware(next, true)
+}
+
+func authMiddleware(next http.Handler, allowExpired bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
@@ -102,7 +112,8 @@ func AuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		if time.Now().Unix() > expiryUnix {
+		tokenExpired := time.Now().Unix() > expiryUnix
+		if tokenExpired && !allowExpired {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			_, _ = w.Write([]byte(`{"errors":"Invalid or expired token"}`))
@@ -120,18 +131,24 @@ func AuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// 2. Check session in Redis
+		// 2. Check session in Redis for unexpired tokens. An expired token may
+		// already have been removed by its TTL; logout still needs its username
+		// to clear any remaining session key.
 		redisKey1 := "TOKEN_" + username + "_1"
 		redisKey2 := "TOKEN_" + username + "_2"
 
-		val1, err1 := RedisInstance().GetValue(r.Context(), redisKey1)
-		val2, err2 := RedisInstance().GetValue(r.Context(), redisKey2)
+		var val1 string
+		if !tokenExpired {
+			var err1, err2 error
+			val1, err1 = RedisInstance().GetValue(r.Context(), redisKey1)
+			val2, err2 := RedisInstance().GetValue(r.Context(), redisKey2)
 
-		if (err1 != nil || val1 != tokenStr) && (err2 != nil || val2 != tokenStr) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"errors":"Invalid or expired token"}`))
-			return
+			if (err1 != nil || val1 != tokenStr) && (err2 != nil || val2 != tokenStr) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"errors":"Invalid or expired token"}`))
+				return
+			}
 		}
 
 		// 3. Automatic session refresh mechanism
@@ -140,7 +157,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 
 		// Only trigger refresh if the request token is the primary one in key1
 		// to avoid redundant/overlapping refreshes from key2 requests.
-		if tokenStr == val1 && remainingTime < refreshThreshold {
+		if !tokenExpired && tokenStr == val1 && remainingTime < refreshThreshold {
 			// Get TTL and rotate key1 to key2
 			ttlVal, getTtlErr := RedisInstance().GetTTL(r.Context(), redisKey1)
 			if getTtlErr == nil && ttlVal > 0 {
@@ -177,8 +194,10 @@ func AuthMiddleware(next http.Handler) http.Handler {
 				w.Header().Set("xrfs-token", tokenStr)
 			}
 		} else {
-			// If not refreshing or matching key2, just use the current request token
-			w.Header().Set("xrfs-token", tokenStr)
+			// Do not return an expired token as if it were a usable session token.
+			if !tokenExpired {
+				w.Header().Set("xrfs-token", tokenStr)
+			}
 		}
 
 		ctx := context.WithValue(r.Context(), UserIDKey, userId)
