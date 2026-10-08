@@ -190,7 +190,7 @@ func (r MenuPostgresRepo) GetAssignedEndpoints(ctx context.Context, menuID uuid.
 			CASE WHEN ma.menu_id IS NOT NULL THEN 1 ELSE 0 END AS status
 		FROM apis a
 		LEFT JOIN menu_api ma ON ma.api_id = a.id AND ma.menu_id = $1
-		ORDER BY a.created_at ASC;`
+		ORDER BY status DESC, a.created_at ASC;`
 	rows, err := db.QueryContext(ctx, query, menuID)
 	if err != nil {
 		return nil, errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed to get assigned endpoints", Function: "MenuPostgresRepo.GetAssignedEndpoints"}
