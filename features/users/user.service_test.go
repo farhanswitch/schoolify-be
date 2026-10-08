@@ -28,6 +28,7 @@ type mockUserRepo struct {
 	GetUserByUsernameFunc func(param models.UserLoginRequest) (models.User, errUtility.CustomError)
 	RegisterUserFunc      func(user models.UserRegisterRequest) (bool, errUtility.CustomError)
 	UserLoginFunc         func(user models.UserLoginRequest) (models.UserLoginData, errUtility.CustomError)
+	GetAccessMenusFunc    func(ctx context.Context, userID string) ([]models.UserAccessMenuResponse, errUtility.CustomError)
 }
 
 func (m *mockUserRepo) GetUserByUsername(param models.UserLoginRequest) (models.User, errUtility.CustomError) {
@@ -51,10 +52,54 @@ func (m *mockUserRepo) UserLogin(user models.UserLoginRequest) (models.UserLogin
 	return models.UserLoginData{}, errUtility.CustomError{}
 }
 
+func (m *mockUserRepo) GetAccessMenus(ctx context.Context, userID string) ([]models.UserAccessMenuResponse, errUtility.CustomError) {
+	if m.GetAccessMenusFunc != nil {
+		return m.GetAccessMenusFunc(ctx, userID)
+	}
+	return []models.UserAccessMenuResponse{}, errUtility.CustomError{}
+}
+
 type mockRedisUtility struct {
 	SaveValueFunc   func(ctx context.Context, key string, value interface{}, ttl time.Duration) error
 	DeleteValueFunc func(ctx context.Context, key string) error
 	GetValueFunc    func(ctx context.Context, key string) (string, error)
+}
+
+func TestGetAccessMenusSrvc(t *testing.T) {
+	endpointRoot := uuid.New()
+	endpointChild := uuid.New()
+	endpointLeaf := uuid.New()
+	childID := "child"
+	rootID := "root"
+
+	service := userService{repo: &mockUserRepo{GetAccessMenusFunc: func(_ context.Context, userID string) ([]models.UserAccessMenuResponse, errUtility.CustomError) {
+		if userID != "user-1" {
+			t.Fatalf("expected user ID user-1, got %q", userID)
+		}
+		return []models.UserAccessMenuResponse{
+			{ID: "leaf", ParentID: &childID, Name: "Leaf", SortOrder: 1, Endpoints: []models.MenuApiResponse{{Id: endpointLeaf, Name: "Leaf endpoint", Status: 1}}},
+			{ID: "child", ParentID: &rootID, Name: "Child", SortOrder: 1, Endpoints: []models.MenuApiResponse{{Id: endpointChild, Name: "Child endpoint", Status: 1}}},
+			{ID: "root", Name: "Root", SortOrder: 1, Endpoints: []models.MenuApiResponse{{Id: endpointRoot, Name: "Root endpoint", Status: 1}}},
+		}, errUtility.CustomError{}
+	}}}
+
+	menus, errObj := service.GetAccessMenusSrvc(context.Background(), "user-1")
+	if errObj.Code != 0 {
+		t.Fatalf("expected no error, got %d", errObj.Code)
+	}
+	if len(menus) != 1 || menus[0].ID != "root" {
+		t.Fatalf("expected one root menu, got %#v", menus)
+	}
+	if len(menus[0].Children) != 1 || menus[0].Children[0].ID != "child" {
+		t.Fatalf("expected child hierarchy, got %#v", menus[0].Children)
+	}
+	child := menus[0].Children[0]
+	if len(child.Children) != 1 || child.Children[0].ID != "leaf" {
+		t.Fatalf("expected leaf hierarchy, got %#v", child.Children)
+	}
+	if len(child.Endpoints) != 2 || child.Endpoints[0].Id != endpointChild || child.Endpoints[1].Id != endpointLeaf {
+		t.Fatalf("expected child endpoints plus leaf endpoint, got %#v", child.Endpoints)
+	}
 }
 
 func (m *mockRedisUtility) SaveValue(ctx context.Context, key string, value interface{}, ttl time.Duration) error {

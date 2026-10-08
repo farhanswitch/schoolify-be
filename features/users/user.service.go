@@ -8,6 +8,7 @@ import (
 	utilities "schoolify_be/utilities"
 	custom_errors "schoolify_be/utilities/errors"
 	errUtility "schoolify_be/utilities/errors"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,6 +20,7 @@ type userPostgresRepoInterface interface {
 	GetUserByUsername(param models.UserLoginRequest) (models.User, errUtility.CustomError)
 	RegisterUser(user models.UserRegisterRequest) (bool, errUtility.CustomError)
 	UserLogin(user models.UserLoginRequest) (models.UserLoginData, errUtility.CustomError)
+	GetAccessMenus(ctx context.Context, userID string) ([]models.UserAccessMenuResponse, errUtility.CustomError)
 }
 
 type redisUtilityInterface interface {
@@ -149,6 +151,89 @@ func (s userService) UserLogin(param models.UserLoginRequest) (map[string]any, e
 
 	return claims, errObj
 
+}
+
+func (s userService) GetAccessMenusSrvc(ctx context.Context, userID string) ([]*models.UserAccessMenuResponse, errUtility.CustomError) {
+	flatMenus, errObj := s.repo.GetAccessMenus(ctx, userID)
+	if errObj.Code > 0 {
+		return []*models.UserAccessMenuResponse{}, errObj
+	}
+	return buildUserAccessMenuTree(flatMenus), errUtility.CustomError{}
+}
+
+func buildUserAccessMenuTree(flatMenus []models.UserAccessMenuResponse) []*models.UserAccessMenuResponse {
+	nodes := make(map[string]*models.UserAccessMenuResponse, len(flatMenus))
+	for i := range flatMenus {
+		node := flatMenus[i]
+		node.Children = []*models.UserAccessMenuResponse{}
+		if node.Endpoints == nil {
+			node.Endpoints = []models.MenuApiResponse{}
+		}
+		nodes[node.ID] = &node
+	}
+
+	roots := make([]*models.UserAccessMenuResponse, 0)
+	for _, node := range nodes {
+		if node.ParentID != nil {
+			if parent, found := nodes[*node.ParentID]; found {
+				parent.Children = append(parent.Children, node)
+				continue
+			}
+		}
+		roots = append(roots, node)
+	}
+	sortUserAccessMenuTree(roots)
+	appendLeafChildEndpoints(roots)
+	return roots
+}
+
+func sortUserAccessMenuTree(nodes []*models.UserAccessMenuResponse) {
+	sort.SliceStable(nodes, func(i, j int) bool {
+		if nodes[i].SortOrder == nodes[j].SortOrder {
+			return nodes[i].ID < nodes[j].ID
+		}
+		return nodes[i].SortOrder < nodes[j].SortOrder
+	})
+	for _, node := range nodes {
+		sortUserAccessMenuTree(node.Children)
+	}
+}
+
+// appendLeafChildEndpoints makes the final submenu level immediately usable:
+// when every direct child is a leaf, the parent exposes all endpoints assigned
+// to those children while the children remain in the response hierarchy.
+func appendLeafChildEndpoints(nodes []*models.UserAccessMenuResponse) {
+	for _, node := range nodes {
+		appendLeafChildEndpoints(node.Children)
+		if len(node.Children) == 0 {
+			continue
+		}
+
+		allChildrenAreLeaves := true
+		for _, child := range node.Children {
+			if len(child.Children) > 0 {
+				allChildrenAreLeaves = false
+				break
+			}
+		}
+		if !allChildrenAreLeaves {
+			continue
+		}
+
+		seen := make(map[uuid.UUID]struct{}, len(node.Endpoints))
+		for _, endpoint := range node.Endpoints {
+			seen[endpoint.Id] = struct{}{}
+		}
+		for _, child := range node.Children {
+			for _, endpoint := range child.Endpoints {
+				if _, exists := seen[endpoint.Id]; exists {
+					continue
+				}
+				seen[endpoint.Id] = struct{}{}
+				node.Endpoints = append(node.Endpoints, endpoint)
+			}
+		}
+	}
 }
 
 func (s userService) LogoutSrvc(ctx context.Context, username string) errUtility.CustomError {

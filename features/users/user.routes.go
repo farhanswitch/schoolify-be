@@ -14,4 +14,5 @@ func InitModule(router *chi.Mux) {
 	router.Post("/api/auth/login", controller.UserLoginCtrl)
 	router.Post("/api/auth/register", controller.RegisterUserCtrl)
 	router.With(utilities.LogoutAuthMiddleware).Post("/api/auth/logout", controller.LogoutCtrl)
+	router.With(utilities.AuthMiddleware).Get("/api/user/access-menu", controller.GetAccessMenusCtrl)
 }

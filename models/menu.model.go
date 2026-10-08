@@ -40,6 +40,19 @@ type MenuApiResponse struct {
 	Status      int       `json:"status"`
 }
 
+// UserAccessMenuResponse represents one menu available to the authenticated
+// user. Every item and endpoint in this response is assigned to that user's
+// current role.
+type UserAccessMenuResponse struct {
+	ID          string                    `json:"id"`
+	ParentID    *string                   `json:"parentId,omitempty"`
+	Name        string                    `json:"name"`
+	Description string                    `json:"description"`
+	SortOrder   int                       `json:"sortOrder"`
+	Endpoints   []MenuApiResponse         `json:"endpoints"`
+	Children    []*UserAccessMenuResponse `json:"children"`
+}
+
 type MenuResponse struct {
 	Id          string          `json:"id"`
 	ParentId    *string         `json:"parentId"`

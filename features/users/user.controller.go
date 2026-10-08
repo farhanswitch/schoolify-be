@@ -20,6 +20,37 @@ type userServiceInterface interface {
 	RegisterUserSrvc(param models.UserRegisterRequest) (bool, errUtility.CustomError)
 	UserLogin(param models.UserLoginRequest) (map[string]any, errUtility.CustomError)
 	LogoutSrvc(ctx context.Context, username string) errUtility.CustomError
+	GetAccessMenusSrvc(ctx context.Context, userID string) ([]*models.UserAccessMenuResponse, errUtility.CustomError)
+}
+
+func (c userController) GetAccessMenusCtrl(w http.ResponseWriter, r *http.Request) {
+	userID := utilities.GetUserID(r.Context())
+	if userID == "" {
+		utilities.WriteJSON(w, http.StatusUnauthorized, map[string]string{"message": "Unauthorized"})
+		return
+	}
+
+	data, errObj := c.service.GetAccessMenusSrvc(r.Context(), userID)
+	if errObj.Code > 0 {
+		errObj.Compile()
+		statusCode := int(errObj.Code)
+		if statusCode < http.StatusBadRequest {
+			statusCode = http.StatusInternalServerError
+		}
+		utilities.WriteJSON(w, statusCode, map[string]interface{}{
+			"message": "Failed to get access menus",
+			"errors":  errObj.MessageToSend,
+		})
+		return
+	}
+
+	if data == nil {
+		data = []*models.UserAccessMenuResponse{}
+	}
+	utilities.WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"message": "Access menus retrieved successfully",
+		"data":    data,
+	})
 }
 
 func (c userController) LogoutCtrl(w http.ResponseWriter, r *http.Request) {

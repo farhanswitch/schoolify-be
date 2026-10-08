@@ -1,6 +1,7 @@
 package postgresql
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 	connections "schoolify_be/connections"
@@ -8,6 +9,8 @@ import (
 	utility "schoolify_be/utilities"
 	errUtility "schoolify_be/utilities/errors"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 type UserPostgresRepo struct{}
@@ -115,6 +118,119 @@ func (UserPostgresRepo) UserLogin(user models.UserLoginRequest) (models.UserLogi
 		MessageToSend: "Invalid username or password",
 	}
 }
+
+// GetAccessMenus returns the flat, assigned menu set for a user's current
+// role. Tree construction and leaf endpoint aggregation are kept in the
+// service so the repository stays responsible only for data retrieval.
+func (UserPostgresRepo) GetAccessMenus(ctx context.Context, userID string) ([]models.UserAccessMenuResponse, errUtility.CustomError) {
+	const query = `
+		SELECT
+			m.id, m.parent_id, m.name, m.description, m.sort_order,
+			a.id, a.name, a.description, a.path, a.method, a.created_at, a.updated_at
+		FROM users u
+		JOIN role_menu rm ON rm.role_id = u.role_id
+		JOIN menus m ON m.id = rm.menu_id
+		LEFT JOIN menu_api ma ON ma.menu_id = m.id
+		LEFT JOIN apis a ON a.id = ma.api_id
+		WHERE u.id = $1
+		ORDER BY m.parent_id NULLS FIRST, m.sort_order ASC, m.created_at ASC, a.created_at ASC;`
+
+	rows, err := connections.DbPostgres().QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, errUtility.CustomError{
+			Code:          http.StatusInternalServerError,
+			Message:       err.Error(),
+			MessageToSend: "Failed to get access menus",
+			Function:      "UserPostgresRepo.GetAccessMenus",
+		}
+	}
+	defer rows.Close()
+
+	menusByID := make(map[string]*models.UserAccessMenuResponse)
+	menuOrder := make([]string, 0)
+	endpointIDsByMenu := make(map[string]map[uuid.UUID]struct{})
+
+	for rows.Next() {
+		var (
+			menuID, menuName                                                                                                  string
+			parentID, menuDescription                                                                                         sql.NullString
+			sortOrder                                                                                                         int
+			endpointID, endpointName, endpointDescription, endpointPath, endpointMethod, endpointCreatedAt, endpointUpdatedAt sql.NullString
+		)
+		if err := rows.Scan(
+			&menuID, &parentID, &menuName, &menuDescription, &sortOrder,
+			&endpointID, &endpointName, &endpointDescription, &endpointPath, &endpointMethod, &endpointCreatedAt, &endpointUpdatedAt,
+		); err != nil {
+			return nil, errUtility.CustomError{
+				Code:          http.StatusInternalServerError,
+				Message:       err.Error(),
+				MessageToSend: "Failed to get access menus",
+				Function:      "UserPostgresRepo.GetAccessMenus",
+			}
+		}
+
+		menu, exists := menusByID[menuID]
+		if !exists {
+			menu = &models.UserAccessMenuResponse{
+				ID:        menuID,
+				Name:      menuName,
+				SortOrder: sortOrder,
+				Endpoints: []models.MenuApiResponse{},
+				Children:  []*models.UserAccessMenuResponse{},
+			}
+			if parentID.Valid && parentID.String != "" {
+				parent := parentID.String
+				menu.ParentID = &parent
+			}
+			if menuDescription.Valid {
+				menu.Description = menuDescription.String
+			}
+			menusByID[menuID] = menu
+			menuOrder = append(menuOrder, menuID)
+			endpointIDsByMenu[menuID] = make(map[uuid.UUID]struct{})
+		}
+
+		if endpointID.Valid {
+			endpointUUID, parseErr := uuid.Parse(endpointID.String)
+			if parseErr != nil {
+				return nil, errUtility.CustomError{
+					Code:          http.StatusInternalServerError,
+					Message:       parseErr.Error(),
+					MessageToSend: "Failed to get access menus",
+					Function:      "UserPostgresRepo.GetAccessMenus",
+				}
+			}
+			if _, duplicate := endpointIDsByMenu[menuID][endpointUUID]; !duplicate {
+				endpointIDsByMenu[menuID][endpointUUID] = struct{}{}
+				menu.Endpoints = append(menu.Endpoints, models.MenuApiResponse{
+					Id:          endpointUUID,
+					Name:        endpointName.String,
+					Description: endpointDescription.String,
+					Path:        endpointPath.String,
+					Method:      endpointMethod.String,
+					CreatedAt:   endpointCreatedAt.String,
+					UpdatedAt:   endpointUpdatedAt.String,
+					Status:      1,
+				})
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, errUtility.CustomError{
+			Code:          http.StatusInternalServerError,
+			Message:       err.Error(),
+			MessageToSend: "Failed to get access menus",
+			Function:      "UserPostgresRepo.GetAccessMenus",
+		}
+	}
+
+	flatMenus := make([]models.UserAccessMenuResponse, 0, len(menuOrder))
+	for _, menuID := range menuOrder {
+		flatMenus = append(flatMenus, *menusByID[menuID])
+	}
+	return flatMenus, errUtility.CustomError{}
+}
+
 func FactoryUserRepo() UserPostgresRepo {
 	if userRepo == (UserPostgresRepo{}) {
 		userRepo = UserPostgresRepo{}

@@ -20,6 +20,7 @@ type mockUserService struct {
 	RegisterUserSrvcFunc          func(param models.UserRegisterRequest) (bool, errUtility.CustomError)
 	UserLoginFunc                 func(param models.UserLoginRequest) (map[string]any, errUtility.CustomError)
 	LogoutSrvcFunc                func(ctx context.Context, username string) errUtility.CustomError
+	GetAccessMenusSrvcFunc        func(ctx context.Context, userID string) ([]*models.UserAccessMenuResponse, errUtility.CustomError)
 }
 
 func (m *mockUserService) GetUserDataByUsernameSrvc(param models.UserLoginRequest) (models.User, errUtility.CustomError) {
@@ -48,6 +49,47 @@ func (m *mockUserService) LogoutSrvc(ctx context.Context, username string) errUt
 		return m.LogoutSrvcFunc(ctx, username)
 	}
 	return errUtility.CustomError{}
+}
+
+func (m *mockUserService) GetAccessMenusSrvc(ctx context.Context, userID string) ([]*models.UserAccessMenuResponse, errUtility.CustomError) {
+	if m.GetAccessMenusSrvcFunc != nil {
+		return m.GetAccessMenusSrvcFunc(ctx, userID)
+	}
+	return []*models.UserAccessMenuResponse{}, errUtility.CustomError{}
+}
+
+func TestGetAccessMenusCtrl(t *testing.T) {
+	t.Run("should return 401 without an authenticated user", func(t *testing.T) {
+		ctrl := userController{service: &mockUserService{}}
+		writer := httptest.NewRecorder()
+
+		ctrl.GetAccessMenusCtrl(writer, httptest.NewRequest(http.MethodGet, "/api/user/access-menu", nil))
+
+		if writer.Code != http.StatusUnauthorized {
+			t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, writer.Code)
+		}
+	})
+
+	t.Run("should return the authenticated user's menu hierarchy", func(t *testing.T) {
+		ctrl := userController{service: &mockUserService{GetAccessMenusSrvcFunc: func(_ context.Context, userID string) ([]*models.UserAccessMenuResponse, errUtility.CustomError) {
+			if userID != "user-1" {
+				t.Fatalf("expected user ID user-1, got %q", userID)
+			}
+			return []*models.UserAccessMenuResponse{{ID: "menu-1", Name: "Dashboard", Endpoints: []models.MenuApiResponse{}}}, errUtility.CustomError{}
+		}}}
+		request := httptest.NewRequest(http.MethodGet, "/api/user/access-menu", nil)
+		request = request.WithContext(context.WithValue(request.Context(), utilities.UserIDKey, "user-1"))
+		writer := httptest.NewRecorder()
+
+		ctrl.GetAccessMenusCtrl(writer, request)
+
+		if writer.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d", http.StatusOK, writer.Code)
+		}
+		if !strings.Contains(writer.Body.String(), "Access menus retrieved successfully") || !strings.Contains(writer.Body.String(), "menu-1") {
+			t.Fatalf("unexpected response: %s", writer.Body.String())
+		}
+	})
 }
 
 func TestLogoutCtrl(t *testing.T) {
