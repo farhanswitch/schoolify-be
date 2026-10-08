@@ -41,9 +41,9 @@ type RoleMenuResponse struct {
 	ParentId    *string             `json:"parentId"`
 	Name        string              `json:"name"`
 	Description string              `json:"description"`
+	SortOrder   int                 `json:"sortOrder"`
 	CreatedAt   string              `json:"createdAt"`
 	UpdatedAt   string              `json:"updatedAt"`
 	Status      int                 `json:"status"`
 	Children    []*RoleMenuResponse `json:"children"`
 }
-

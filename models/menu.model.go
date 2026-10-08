@@ -9,6 +9,7 @@ type CreateMenuRequest struct {
 	ParentID    uuid.UUID `json:"parentID" validate:"omitempty,lte=40"`
 	Name        string    `json:"name" validate:"required,gte=3,lte=50"`
 	Description string    `json:"description" validate:"required,gte=3,lte=100"`
+	SortOrder   *int      `json:"sortOrder,omitempty" validate:"omitempty,gte=1"`
 }
 
 type UpdateMenuRequest struct {
@@ -16,6 +17,12 @@ type UpdateMenuRequest struct {
 	ParentID    uuid.UUID `json:"parentID" validate:"omitempty,lte=40"`
 	Name        string    `json:"name" validate:"required,gte=3,lte=50"`
 	Description string    `json:"description" validate:"required,gte=3,lte=100"`
+	SortOrder   *int      `json:"sortOrder,omitempty" validate:"omitempty,gte=1"`
+}
+
+type MenuSortOrderInfo struct {
+	SortOrder          int `json:"sortOrder"`
+	SuggestedSortOrder int `json:"suggestedSortOrder"`
 }
 
 type AssignApiRequest struct {
@@ -38,6 +45,7 @@ type MenuResponse struct {
 	ParentId    *string         `json:"parentId"`
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
+	SortOrder   int             `json:"sortOrder"`
 	CreatedAt   string          `json:"createdAt"`
 	UpdatedAt   string          `json:"updatedAt"`
 	Children    []*MenuResponse `json:"children"`

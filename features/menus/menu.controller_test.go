@@ -19,8 +19,10 @@ import (
 type mockMenuService struct {
 	GetAllMenusSrvcFunc          func(ctx context.Context) ([]*models.MenuResponse, errUtility.CustomError)
 	CreateMenuSrvcFunc           func(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
+	CreateMenuWithOrderSrvcFunc  func(ctx context.Context, param models.CreateMenuRequest) (models.MenuSortOrderInfo, errUtility.CustomError)
 	GetByIDSrvcFunc              func(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError)
 	UpdateMenuSrvcFunc           func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError
+	UpdateMenuWithOrderSrvcFunc  func(ctx context.Context, param models.UpdateMenuRequest) (models.MenuSortOrderInfo, errUtility.CustomError)
 	AssignApiSrvcFunc            func(ctx context.Context, menuID uuid.UUID, param models.AssignApiRequest) errUtility.CustomError
 	GetAssignedEndpointsSrvcFunc func(ctx context.Context, menuID uuid.UUID) ([]models.MenuApiResponse, errUtility.CustomError)
 	DeleteSrvcFunc               func(ctx context.Context, menuID uuid.UUID) errUtility.CustomError
@@ -33,11 +35,14 @@ func (m *mockMenuService) GetAllMenusSrvc(ctx context.Context) ([]*models.MenuRe
 	return []*models.MenuResponse{}, errUtility.CustomError{}
 }
 
-func (m *mockMenuService) CreateMenuSrvc(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError {
-	if m.CreateMenuSrvcFunc != nil {
-		return m.CreateMenuSrvcFunc(ctx, param)
+func (m *mockMenuService) CreateMenuSrvc(ctx context.Context, param models.CreateMenuRequest) (models.MenuSortOrderInfo, errUtility.CustomError) {
+	if m.CreateMenuWithOrderSrvcFunc != nil {
+		return m.CreateMenuWithOrderSrvcFunc(ctx, param)
 	}
-	return errUtility.CustomError{}
+	if m.CreateMenuSrvcFunc != nil {
+		return models.MenuSortOrderInfo{}, m.CreateMenuSrvcFunc(ctx, param)
+	}
+	return models.MenuSortOrderInfo{}, errUtility.CustomError{}
 }
 
 func (m *mockMenuService) GetByIDSrvc(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError) {
@@ -47,11 +52,14 @@ func (m *mockMenuService) GetByIDSrvc(ctx context.Context, menuID uuid.UUID) (mo
 	return models.MenuResponse{}, errUtility.CustomError{}
 }
 
-func (m *mockMenuService) UpdateMenuSrvc(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError {
-	if m.UpdateMenuSrvcFunc != nil {
-		return m.UpdateMenuSrvcFunc(ctx, param)
+func (m *mockMenuService) UpdateMenuSrvc(ctx context.Context, param models.UpdateMenuRequest) (models.MenuSortOrderInfo, errUtility.CustomError) {
+	if m.UpdateMenuWithOrderSrvcFunc != nil {
+		return m.UpdateMenuWithOrderSrvcFunc(ctx, param)
 	}
-	return errUtility.CustomError{}
+	if m.UpdateMenuSrvcFunc != nil {
+		return models.MenuSortOrderInfo{}, m.UpdateMenuSrvcFunc(ctx, param)
+	}
+	return models.MenuSortOrderInfo{}, errUtility.CustomError{}
 }
 
 func (m *mockMenuService) AssignApiSrvc(ctx context.Context, menuID uuid.UUID, param models.AssignApiRequest) errUtility.CustomError {
@@ -280,6 +288,27 @@ func TestCreateCtrl(t *testing.T) {
 		}
 	})
 
+	t.Run("should reject non-positive sort order", func(t *testing.T) {
+		for _, sortOrder := range []int{0, -1} {
+			ctrl := menuController{service: &mockMenuService{}}
+			req := httptest.NewRequest(http.MethodPost, "/api/menu", buildJSONBody(map[string]interface{}{
+				"name":        "Dashboard",
+				"description": "Main dashboard menu",
+				"sortOrder":   sortOrder,
+			}))
+			w := httptest.NewRecorder()
+
+			ctrl.createCtrl(w, req)
+
+			if w.Code != http.StatusUnprocessableEntity {
+				t.Errorf("expected status 422 for sortOrder %d, got %d", sortOrder, w.Code)
+			}
+			if !strings.Contains(w.Body.String(), "SortOrder") {
+				t.Errorf("expected sortOrder validation error, got %s", w.Body.String())
+			}
+		}
+	})
+
 	t.Run("should return 400 when parentID does not exist in database", func(t *testing.T) {
 		parentID := uuid.New().String()
 		payload := map[string]interface{}{
@@ -368,8 +397,8 @@ func TestCreateCtrl(t *testing.T) {
 
 	t.Run("should return 201 Created on successful menu creation", func(t *testing.T) {
 		mockSrv := &mockMenuService{
-			CreateMenuSrvcFunc: func(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError {
-				return errUtility.CustomError{}
+			CreateMenuWithOrderSrvcFunc: func(ctx context.Context, param models.CreateMenuRequest) (models.MenuSortOrderInfo, errUtility.CustomError) {
+				return models.MenuSortOrderInfo{SortOrder: 2, SuggestedSortOrder: 3}, errUtility.CustomError{}
 			},
 		}
 		ctrl := menuController{service: mockSrv}
@@ -383,6 +412,27 @@ func TestCreateCtrl(t *testing.T) {
 		}
 		if !strings.Contains(w.Body.String(), "Menu created successfully") {
 			t.Errorf("expected response to contain 'Menu created successfully', got %s", w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), `"sortOrder":2`) || !strings.Contains(w.Body.String(), `"suggestedSortOrder":3`) {
+			t.Errorf("expected response to include chosen and suggested sort orders, got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return a suggested order when the requested order is unavailable", func(t *testing.T) {
+		ctrl := menuController{service: &mockMenuService{CreateMenuWithOrderSrvcFunc: func(ctx context.Context, param models.CreateMenuRequest) (models.MenuSortOrderInfo, errUtility.CustomError) {
+			return models.MenuSortOrderInfo{SuggestedSortOrder: 3}, errUtility.CustomError{
+				Code:          http.StatusConflict,
+				MessageToSend: "Sort order is already in use",
+				Property:      "sortOrder",
+			}
+		}}}
+		req := httptest.NewRequest(http.MethodPost, "/api/menu", buildJSONBody(defaultPayload))
+		w := httptest.NewRecorder()
+
+		ctrl.createCtrl(w, req)
+
+		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), `"suggestedSortOrder":3`) {
+			t.Errorf("expected 409 with suggestedSortOrder 3, got status=%d body=%s", w.Code, w.Body.String())
 		}
 	})
 }
@@ -553,6 +603,28 @@ func TestUpdateCtrl(t *testing.T) {
 		}
 	})
 
+	t.Run("should reject non-positive sort order", func(t *testing.T) {
+		for _, sortOrder := range []int{0, -1} {
+			ctrl := menuController{service: &mockMenuService{}}
+			req := httptest.NewRequest(http.MethodPut, "/api/menu", buildJSONBody(map[string]interface{}{
+				"id":          uuid.New().String(),
+				"name":        "Dashboard",
+				"description": "Main dashboard menu",
+				"sortOrder":   sortOrder,
+			}))
+			w := httptest.NewRecorder()
+
+			ctrl.updateCtrl(w, req)
+
+			if w.Code != http.StatusUnprocessableEntity {
+				t.Errorf("expected status 422 for sortOrder %d, got %d", sortOrder, w.Code)
+			}
+			if !strings.Contains(w.Body.String(), "SortOrder") {
+				t.Errorf("expected sortOrder validation error, got %s", w.Body.String())
+			}
+		}
+	})
+
 	t.Run("should return 400 when parentID does not exist in database", func(t *testing.T) {
 		parentID := uuid.New().String()
 		payload := map[string]interface{}{
@@ -669,8 +741,8 @@ func TestUpdateCtrl(t *testing.T) {
 
 	t.Run("should return 201 Created on successful menu update", func(t *testing.T) {
 		mockSrv := &mockMenuService{
-			UpdateMenuSrvcFunc: func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError {
-				return errUtility.CustomError{}
+			UpdateMenuWithOrderSrvcFunc: func(ctx context.Context, param models.UpdateMenuRequest) (models.MenuSortOrderInfo, errUtility.CustomError) {
+				return models.MenuSortOrderInfo{SortOrder: 4, SuggestedSortOrder: 5}, errUtility.CustomError{}
 			},
 		}
 		ctrl := menuController{service: mockSrv}
@@ -684,6 +756,27 @@ func TestUpdateCtrl(t *testing.T) {
 		}
 		if !strings.Contains(w.Body.String(), "Menu updated successfully") {
 			t.Errorf("expected response to contain 'Menu updated successfully', got %s", w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), `"sortOrder":4`) || !strings.Contains(w.Body.String(), `"suggestedSortOrder":5`) {
+			t.Errorf("expected response to include chosen and suggested sort orders, got %s", w.Body.String())
+		}
+	})
+
+	t.Run("should return a suggested order when the requested order is unavailable", func(t *testing.T) {
+		ctrl := menuController{service: &mockMenuService{UpdateMenuWithOrderSrvcFunc: func(ctx context.Context, param models.UpdateMenuRequest) (models.MenuSortOrderInfo, errUtility.CustomError) {
+			return models.MenuSortOrderInfo{SuggestedSortOrder: 5}, errUtility.CustomError{
+				Code:          http.StatusConflict,
+				MessageToSend: "Sort order is already in use",
+				Property:      "sortOrder",
+			}
+		}}}
+		req := httptest.NewRequest(http.MethodPut, "/api/menu", buildJSONBody(defaultPayload))
+		w := httptest.NewRecorder()
+
+		ctrl.updateCtrl(w, req)
+
+		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), `"suggestedSortOrder":5`) {
+			t.Errorf("expected 409 with suggestedSortOrder 5, got status=%d body=%s", w.Code, w.Body.String())
 		}
 	})
 }

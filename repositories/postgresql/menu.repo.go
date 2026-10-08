@@ -18,9 +18,49 @@ type MenuPostgresRepo struct{}
 
 var menuRepo MenuPostgresRepo
 
+type menuSortOrderQueryer interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func menuParentQueryValue(parentID uuid.UUID) any {
+	if parentID == uuid.Nil {
+		return nil
+	}
+	return parentID
+}
+
+func nextMenuSortOrder(ctx context.Context, queryer menuSortOrderQueryer, parentID uuid.UUID, exceptMenuID any) (int, error) {
+	var next int
+	err := queryer.QueryRowContext(ctx, `
+		SELECT COALESCE(MAX(sort_order), 0) + 1
+		FROM menus
+		WHERE parent_id IS NOT DISTINCT FROM $1
+		  AND ($2::uuid IS NULL OR id <> $2);`, menuParentQueryValue(parentID), exceptMenuID).Scan(&next)
+	return next, err
+}
+
+func menuSortOrderExists(ctx context.Context, queryer menuSortOrderQueryer, parentID uuid.UUID, sortOrder int, exceptMenuID any) (bool, error) {
+	var exists bool
+	err := queryer.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM menus
+			WHERE parent_id IS NOT DISTINCT FROM $1
+			  AND sort_order = $2
+			  AND ($3::uuid IS NULL OR id <> $3)
+		);`, menuParentQueryValue(parentID), sortOrder, exceptMenuID).Scan(&exists)
+	return exists, err
+}
+
+func lockMenuSortOrderWrites(ctx context.Context, tx *sql.Tx) error {
+	// Menu administration is low-volume; serializing these short transactions
+	// keeps sibling sort-order recommendations and uniqueness checks race-free.
+	_, err := tx.ExecContext(ctx, "LOCK TABLE menus IN SHARE ROW EXCLUSIVE MODE;")
+	return err
+}
+
 func (r MenuPostgresRepo) GetAll(ctx context.Context) ([]models.MenuResponse, errUtility.CustomError) {
 	db := connections.DbPostgres()
-	query := "SELECT id, parent_id, name, description, created_at, updated_at FROM menus"
+	query := "SELECT id, parent_id, name, description, sort_order, created_at, updated_at FROM menus ORDER BY parent_id NULLS FIRST, sort_order ASC, created_at ASC"
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -40,7 +80,7 @@ func (r MenuPostgresRepo) GetAll(ctx context.Context) ([]models.MenuResponse, er
 		var data models.MenuResponse
 		var parentId, description, updatedAt sql.NullString
 
-		err = rows.Scan(&data.Id, &parentId, &data.Name, &description, &data.CreatedAt, &updatedAt)
+		err = rows.Scan(&data.Id, &parentId, &data.Name, &description, &data.SortOrder, &data.CreatedAt, &updatedAt)
 		if err != nil {
 			return []models.MenuResponse{}, errUtility.CustomError{
 				Code:     http.StatusInternalServerError,
@@ -74,21 +114,46 @@ func (r MenuPostgresRepo) GetAll(ctx context.Context) ([]models.MenuResponse, er
 	return list, errUtility.CustomError{}
 }
 
-func (r MenuPostgresRepo) Create(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError {
+func (r MenuPostgresRepo) Create(ctx context.Context, param models.CreateMenuRequest) (models.MenuSortOrderInfo, errUtility.CustomError) {
 	db := connections.DbPostgres()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return models.MenuSortOrderInfo{}, errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed create menu", Function: "MenuPostgresRepo.Create"}
+	}
+	defer tx.Rollback()
 
-	var parentID any = nil
-	if param.ParentID != uuid.Nil {
-		parentID = param.ParentID
+	if err = lockMenuSortOrderWrites(ctx, tx); err != nil {
+		return models.MenuSortOrderInfo{}, errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed create menu", Function: "MenuPostgresRepo.Create"}
 	}
 
-	query := "INSERT INTO menus(id, name, description, parent_id) VALUES($1, $2, $3, $4);"
-	_, err := db.ExecContext(ctx, query, param.ID, param.Name, param.Description, parentID)
+	suggestedSortOrder, err := nextMenuSortOrder(ctx, tx, param.ParentID, nil)
+	if err != nil {
+		return models.MenuSortOrderInfo{}, errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed create menu", Function: "MenuPostgresRepo.Create"}
+	}
+	sortOrder := suggestedSortOrder
+	if param.SortOrder != nil {
+		sortOrder = *param.SortOrder
+	}
+	if sortOrder < 1 {
+		return models.MenuSortOrderInfo{SuggestedSortOrder: suggestedSortOrder}, errUtility.CustomError{Code: http.StatusBadRequest, Message: "sortOrder must be greater than zero", MessageToSend: "Sort order must be greater than zero", Property: "sortOrder", Function: "MenuPostgresRepo.Create"}
+	}
+
+	used, err := menuSortOrderExists(ctx, tx, param.ParentID, sortOrder, nil)
+	if err != nil {
+		return models.MenuSortOrderInfo{}, errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed create menu", Function: "MenuPostgresRepo.Create"}
+	}
+	if used {
+		message := fmt.Sprintf("Sort order %d is already in use; suggested sort order is %d", sortOrder, suggestedSortOrder)
+		return models.MenuSortOrderInfo{SuggestedSortOrder: suggestedSortOrder}, errUtility.CustomError{Code: http.StatusConflict, Message: message, MessageToSend: message, Property: "sortOrder", Function: "MenuPostgresRepo.Create"}
+	}
+
+	query := "INSERT INTO menus(id, name, description, parent_id, sort_order) VALUES($1, $2, $3, $4, $5);"
+	_, err = tx.ExecContext(ctx, query, param.ID, param.Name, param.Description, menuParentQueryValue(param.ParentID), sortOrder)
 	if err != nil {
 		errStr := err.Error()
 
 		if strings.Contains(errStr, "menus_parent_id_fkey") || strings.Contains(errStr, "violates foreign key constraint") {
-			return errUtility.CustomError{
+			return models.MenuSortOrderInfo{}, errUtility.CustomError{
 				Code:          http.StatusBadRequest,
 				Message:       errStr,
 				MessageToSend: "Parent menu with the specified ID does not exist",
@@ -98,7 +163,7 @@ func (r MenuPostgresRepo) Create(ctx context.Context, param models.CreateMenuReq
 		}
 
 		if strings.Contains(errStr, "unique constraint") {
-			return errUtility.CustomError{
+			return models.MenuSortOrderInfo{}, errUtility.CustomError{
 				Code:          http.StatusConflict,
 				Message:       errStr,
 				MessageToSend: "Menu name already exists",
@@ -107,14 +172,22 @@ func (r MenuPostgresRepo) Create(ctx context.Context, param models.CreateMenuReq
 			}
 		}
 
-		return errUtility.CustomError{
+		return models.MenuSortOrderInfo{}, errUtility.CustomError{
 			Code:          http.StatusInternalServerError,
 			Message:       errStr,
 			MessageToSend: "Failed create menu",
 			Function:      "MenuPostgresRepo.Create",
 		}
 	}
-	return errUtility.CustomError{}
+
+	suggestedSortOrder, err = nextMenuSortOrder(ctx, tx, param.ParentID, nil)
+	if err != nil {
+		return models.MenuSortOrderInfo{}, errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed create menu", Function: "MenuPostgresRepo.Create"}
+	}
+	if err = tx.Commit(); err != nil {
+		return models.MenuSortOrderInfo{}, errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed create menu", Function: "MenuPostgresRepo.Create"}
+	}
+	return models.MenuSortOrderInfo{SortOrder: sortOrder, SuggestedSortOrder: suggestedSortOrder}, errUtility.CustomError{}
 }
 
 func (r MenuPostgresRepo) AssignApi(ctx context.Context, menuID uuid.UUID, param models.AssignApiRequest) errUtility.CustomError {
@@ -225,8 +298,8 @@ func (r MenuPostgresRepo) GetByID(ctx context.Context, menuID uuid.UUID) (models
 	db := connections.DbPostgres()
 	var data models.MenuResponse
 	var parentId, description, updatedAt sql.NullString
-	query := "SELECT id, parent_id, name, description, created_at, updated_at FROM menus WHERE id=$1;"
-	err := db.QueryRowContext(ctx, query, menuID).Scan(&data.Id, &parentId, &data.Name, &description, &data.CreatedAt, &updatedAt)
+	query := "SELECT id, parent_id, name, description, sort_order, created_at, updated_at FROM menus WHERE id=$1;"
+	err := db.QueryRowContext(ctx, query, menuID).Scan(&data.Id, &parentId, &data.Name, &description, &data.SortOrder, &data.CreatedAt, &updatedAt)
 
 	if err != nil {
 		return models.MenuResponse{}, errUtility.CustomError{
@@ -250,21 +323,67 @@ func (r MenuPostgresRepo) GetByID(ctx context.Context, menuID uuid.UUID) (models
 	return data, errUtility.CustomError{}
 }
 
-func (r MenuPostgresRepo) Update(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError {
+func (r MenuPostgresRepo) Update(ctx context.Context, param models.UpdateMenuRequest) (models.MenuSortOrderInfo, errUtility.CustomError) {
 	db := connections.DbPostgres()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return models.MenuSortOrderInfo{}, errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed update menu", Function: "MenuPostgresRepo.Update"}
+	}
+	defer tx.Rollback()
 
-	var parentID any = nil
-	if param.ParentID != uuid.Nil {
-		parentID = param.ParentID
+	if err = lockMenuSortOrderWrites(ctx, tx); err != nil {
+		return models.MenuSortOrderInfo{}, errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed update menu", Function: "MenuPostgresRepo.Update"}
 	}
 
-	query := "UPDATE menus SET name=$1, description=$2, parent_id=$3 WHERE id=$4;"
-	res, err := db.ExecContext(ctx, query, param.Name, param.Description, parentID, param.ID)
+	var currentParentID sql.NullString
+	var currentSortOrder int
+	err = tx.QueryRowContext(ctx, "SELECT parent_id, sort_order FROM menus WHERE id=$1 FOR UPDATE;", param.ID).Scan(&currentParentID, &currentSortOrder)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return models.MenuSortOrderInfo{}, errUtility.CustomError{Code: http.StatusNotFound, Message: err.Error(), MessageToSend: "Menu not found", Function: "MenuPostgresRepo.Update", Property: "id"}
+		}
+		return models.MenuSortOrderInfo{}, errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed update menu", Function: "MenuPostgresRepo.Update"}
+	}
+
+	var existingParentID uuid.UUID
+	if currentParentID.Valid {
+		existingParentID, err = uuid.Parse(currentParentID.String)
+		if err != nil {
+			return models.MenuSortOrderInfo{}, errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed update menu", Function: "MenuPostgresRepo.Update"}
+		}
+	}
+
+	suggestedSortOrder, err := nextMenuSortOrder(ctx, tx, param.ParentID, nil)
+	if err != nil {
+		return models.MenuSortOrderInfo{}, errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed update menu", Function: "MenuPostgresRepo.Update"}
+	}
+	sortOrder := currentSortOrder
+	if existingParentID != param.ParentID {
+		sortOrder = suggestedSortOrder
+	}
+	if param.SortOrder != nil {
+		sortOrder = *param.SortOrder
+	}
+	if sortOrder < 1 {
+		return models.MenuSortOrderInfo{SuggestedSortOrder: suggestedSortOrder}, errUtility.CustomError{Code: http.StatusBadRequest, Message: "sortOrder must be greater than zero", MessageToSend: "Sort order must be greater than zero", Property: "sortOrder", Function: "MenuPostgresRepo.Update"}
+	}
+
+	used, err := menuSortOrderExists(ctx, tx, param.ParentID, sortOrder, param.ID)
+	if err != nil {
+		return models.MenuSortOrderInfo{}, errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed update menu", Function: "MenuPostgresRepo.Update"}
+	}
+	if used {
+		message := fmt.Sprintf("Sort order %d is already in use; suggested sort order is %d", sortOrder, suggestedSortOrder)
+		return models.MenuSortOrderInfo{SuggestedSortOrder: suggestedSortOrder}, errUtility.CustomError{Code: http.StatusConflict, Message: message, MessageToSend: message, Property: "sortOrder", Function: "MenuPostgresRepo.Update"}
+	}
+
+	query := "UPDATE menus SET name=$1, description=$2, parent_id=$3, sort_order=$4 WHERE id=$5;"
+	res, err := tx.ExecContext(ctx, query, param.Name, param.Description, menuParentQueryValue(param.ParentID), sortOrder, param.ID)
 	if err != nil {
 		errStr := err.Error()
 
 		if strings.Contains(errStr, "menus_parent_id_fkey") || strings.Contains(errStr, "violates foreign key constraint") {
-			return errUtility.CustomError{
+			return models.MenuSortOrderInfo{}, errUtility.CustomError{
 				Code:          http.StatusBadRequest,
 				Message:       errStr,
 				MessageToSend: "Parent menu with the specified ID does not exist",
@@ -274,7 +393,7 @@ func (r MenuPostgresRepo) Update(ctx context.Context, param models.UpdateMenuReq
 		}
 
 		if strings.Contains(errStr, "unique constraint") {
-			return errUtility.CustomError{
+			return models.MenuSortOrderInfo{}, errUtility.CustomError{
 				Code:          http.StatusConflict,
 				Message:       errStr,
 				MessageToSend: "Menu name already exists",
@@ -283,7 +402,7 @@ func (r MenuPostgresRepo) Update(ctx context.Context, param models.UpdateMenuReq
 			}
 		}
 
-		return errUtility.CustomError{
+		return models.MenuSortOrderInfo{}, errUtility.CustomError{
 			Code:          http.StatusInternalServerError,
 			Message:       errStr,
 			MessageToSend: "Failed update menu",
@@ -293,7 +412,7 @@ func (r MenuPostgresRepo) Update(ctx context.Context, param models.UpdateMenuReq
 
 	rowsAffected, err := res.RowsAffected()
 	if err != nil {
-		return errUtility.CustomError{
+		return models.MenuSortOrderInfo{}, errUtility.CustomError{
 			Code:          http.StatusInternalServerError,
 			Message:       err.Error(),
 			MessageToSend: "Failed update menu",
@@ -301,7 +420,7 @@ func (r MenuPostgresRepo) Update(ctx context.Context, param models.UpdateMenuReq
 		}
 	} else {
 		if rowsAffected == 0 {
-			return errUtility.CustomError{
+			return models.MenuSortOrderInfo{}, errUtility.CustomError{
 				Code:          http.StatusNotFound,
 				MessageToSend: "Menu not found",
 				Function:      "MenuPostgresRepo.Update",
@@ -309,7 +428,15 @@ func (r MenuPostgresRepo) Update(ctx context.Context, param models.UpdateMenuReq
 			}
 		}
 	}
-	return errUtility.CustomError{}
+
+	suggestedSortOrder, err = nextMenuSortOrder(ctx, tx, param.ParentID, nil)
+	if err != nil {
+		return models.MenuSortOrderInfo{}, errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed update menu", Function: "MenuPostgresRepo.Update"}
+	}
+	if err = tx.Commit(); err != nil {
+		return models.MenuSortOrderInfo{}, errUtility.CustomError{Code: http.StatusInternalServerError, Message: err.Error(), MessageToSend: "Failed update menu", Function: "MenuPostgresRepo.Update"}
+	}
+	return models.MenuSortOrderInfo{SortOrder: sortOrder, SuggestedSortOrder: suggestedSortOrder}, errUtility.CustomError{}
 }
 
 func (r MenuPostgresRepo) Delete(ctx context.Context, menuID uuid.UUID) errUtility.CustomError {

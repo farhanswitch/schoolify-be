@@ -11,12 +11,12 @@ import (
 )
 
 type mockRoleRepo struct {
-	GetAllFunc  func(ctx context.Context) ([]models.RoleResponse, errUtility.CustomError)
-	CreateFunc  func(ctx context.Context, param models.CreateRoleRequest) errUtility.CustomError
-	UpdateFunc  func(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError
-	GetByIDFunc func(ctx context.Context, roleID uuid.UUID) (models.RoleResponse, errUtility.CustomError)
-	DeleteFunc          func(ctx context.Context, roleID uuid.UUID) errUtility.CustomError
-	AssignMenuFunc      func(ctx context.Context, roleID uuid.UUID, param models.AssignMenuRequest) errUtility.CustomError
+	GetAllFunc           func(ctx context.Context) ([]models.RoleResponse, errUtility.CustomError)
+	CreateFunc           func(ctx context.Context, param models.CreateRoleRequest) errUtility.CustomError
+	UpdateFunc           func(ctx context.Context, param models.UpdateRoleRequest) errUtility.CustomError
+	GetByIDFunc          func(ctx context.Context, roleID uuid.UUID) (models.RoleResponse, errUtility.CustomError)
+	DeleteFunc           func(ctx context.Context, roleID uuid.UUID) errUtility.CustomError
+	AssignMenuFunc       func(ctx context.Context, roleID uuid.UUID, param models.AssignMenuRequest) errUtility.CustomError
 	GetAssignedMenusFunc func(ctx context.Context, roleID uuid.UUID) ([]models.RoleMenuResponse, errUtility.CustomError)
 }
 
@@ -68,8 +68,6 @@ func (m *mockRoleRepo) GetAssignedMenus(ctx context.Context, roleID uuid.UUID) (
 	}
 	return []models.RoleMenuResponse{}, errUtility.CustomError{}
 }
-
-
 
 func TestBuildRoleTree(t *testing.T) {
 	t.Run("should return empty slice when input is empty", func(t *testing.T) {
@@ -769,6 +767,26 @@ func TestBuildRoleMenuTree(t *testing.T) {
 			t.Errorf("expected child status 0, got %d", tree[0].Children[0].Status)
 		}
 	})
+
+	t.Run("should order roots and children by sort order", func(t *testing.T) {
+		rootID := "root"
+		childFirstID, childSecondID := "child-first", "child-second"
+		tree := buildRoleMenuTree([]models.RoleMenuResponse{
+			{Id: childSecondID, ParentId: &rootID, SortOrder: 2},
+			{Id: rootID, SortOrder: 1},
+			{Id: childFirstID, ParentId: &rootID, SortOrder: 1},
+		})
+
+		if len(tree) != 1 || tree[0].Id != rootID {
+			t.Fatalf("expected one root menu %s, got %+v", rootID, tree)
+		}
+		if len(tree[0].Children) != 2 {
+			t.Fatalf("expected 2 children, got %d", len(tree[0].Children))
+		}
+		if tree[0].Children[0].Id != childFirstID || tree[0].Children[1].Id != childSecondID {
+			t.Errorf("expected children ordered [%s, %s], got [%s, %s]", childFirstID, childSecondID, tree[0].Children[0].Id, tree[0].Children[1].Id)
+		}
+	})
 }
 
 func TestGetAssignedMenusSrvc(t *testing.T) {
@@ -854,8 +872,3 @@ func TestGetAssignedMenusSrvc(t *testing.T) {
 		}
 	})
 }
-
-
-
-
-

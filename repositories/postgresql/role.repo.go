@@ -431,12 +431,13 @@ func (r RolePostgresRepo) GetAssignedMenus(ctx context.Context, roleID uuid.UUID
 			m.parent_id, 
 			m.name, 
 			m.description, 
+			m.sort_order,
 			m.created_at, 
 			m.updated_at,
 			CASE WHEN rm.role_id IS NOT NULL THEN 1 ELSE 0 END AS status
 		FROM menus m
 		LEFT JOIN role_menu rm ON rm.menu_id = m.id AND rm.role_id = $1
-		ORDER BY m.created_at ASC;
+		ORDER BY m.parent_id NULLS FIRST, m.sort_order ASC, m.created_at ASC;
 	`
 	rows, err := db.QueryContext(ctx, query, roleID)
 	if err != nil {
@@ -457,7 +458,7 @@ func (r RolePostgresRepo) GetAssignedMenus(ctx context.Context, roleID uuid.UUID
 		var data models.RoleMenuResponse
 		var parentId, description, createdAt, updatedAt sql.NullString
 
-		err = rows.Scan(&data.Id, &parentId, &data.Name, &description, &createdAt, &updatedAt, &data.Status)
+		err = rows.Scan(&data.Id, &parentId, &data.Name, &description, &data.SortOrder, &createdAt, &updatedAt, &data.Status)
 		if err != nil {
 			return nil, errUtility.CustomError{
 				Code:          http.StatusInternalServerError,
@@ -507,4 +508,3 @@ func FactoryRoleRepo() RolePostgresRepo {
 	}
 	return roleRepo
 }
-

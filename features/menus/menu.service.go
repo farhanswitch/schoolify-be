@@ -3,6 +3,8 @@ package menus
 import (
 	"context"
 	"net/http"
+	"sort"
+
 	models "schoolify_be/models"
 	errUtility "schoolify_be/utilities/errors"
 
@@ -11,8 +13,8 @@ import (
 
 type menuPostgresRepoInterface interface {
 	GetAll(ctx context.Context) ([]models.MenuResponse, errUtility.CustomError)
-	Create(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
-	Update(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError
+	Create(ctx context.Context, param models.CreateMenuRequest) (models.MenuSortOrderInfo, errUtility.CustomError)
+	Update(ctx context.Context, param models.UpdateMenuRequest) (models.MenuSortOrderInfo, errUtility.CustomError)
 	AssignApi(ctx context.Context, menuID uuid.UUID, param models.AssignApiRequest) errUtility.CustomError
 	GetAssignedEndpoints(ctx context.Context, menuID uuid.UUID) ([]models.MenuApiResponse, errUtility.CustomError)
 	GetByID(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError)
@@ -37,6 +39,7 @@ func buildMenuTree(flatMenus []menuResponse) []*menuResponse {
 			ParentId:    flatMenus[i].ParentId,
 			Name:        flatMenus[i].Name,
 			Description: flatMenus[i].Description,
+			SortOrder:   flatMenus[i].SortOrder,
 			CreatedAt:   flatMenus[i].CreatedAt,
 			UpdatedAt:   flatMenus[i].UpdatedAt,
 			Children:    []*menuResponse{},
@@ -56,7 +59,20 @@ func buildMenuTree(flatMenus []menuResponse) []*menuResponse {
 			}
 		}
 	}
+	sortMenuTree(rootNodes)
 	return rootNodes
+}
+
+func sortMenuTree(nodes []*menuResponse) {
+	sort.SliceStable(nodes, func(i, j int) bool {
+		if nodes[i].SortOrder == nodes[j].SortOrder {
+			return nodes[i].Id < nodes[j].Id
+		}
+		return nodes[i].SortOrder < nodes[j].SortOrder
+	})
+	for _, node := range nodes {
+		sortMenuTree(node.Children)
+	}
 }
 
 func (s menuService) GetAllMenusSrvc(ctx context.Context) ([]*menuResponse, errUtility.CustomError) {
@@ -67,10 +83,10 @@ func (s menuService) GetAllMenusSrvc(ctx context.Context) ([]*menuResponse, errU
 	return buildMenuTree(flatList), errUtility.CustomError{}
 }
 
-func (s menuService) CreateMenuSrvc(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError {
+func (s menuService) CreateMenuSrvc(ctx context.Context, param models.CreateMenuRequest) (models.MenuSortOrderInfo, errUtility.CustomError) {
 	id, err := uuid.NewV7()
 	if err != nil {
-		return errUtility.CustomError{
+		return models.MenuSortOrderInfo{}, errUtility.CustomError{
 			Code:    http.StatusInternalServerError,
 			Message: "Failed generate UUID",
 		}
@@ -83,7 +99,7 @@ func (s menuService) GetByIDSrvc(ctx context.Context, menuID uuid.UUID) (models.
 	return s.repo.GetByID(ctx, menuID)
 }
 
-func (s menuService) UpdateMenuSrvc(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError {
+func (s menuService) UpdateMenuSrvc(ctx context.Context, param models.UpdateMenuRequest) (models.MenuSortOrderInfo, errUtility.CustomError) {
 	return s.repo.Update(ctx, param)
 }
 

@@ -14,7 +14,9 @@ import (
 type mockMenuRepo struct {
 	GetAllFunc               func(ctx context.Context) ([]models.MenuResponse, errUtility.CustomError)
 	CreateFunc               func(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
+	CreateWithOrderFunc      func(ctx context.Context, param models.CreateMenuRequest) (models.MenuSortOrderInfo, errUtility.CustomError)
 	UpdateFunc               func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError
+	UpdateWithOrderFunc      func(ctx context.Context, param models.UpdateMenuRequest) (models.MenuSortOrderInfo, errUtility.CustomError)
 	AssignApiFunc            func(ctx context.Context, menuID uuid.UUID, param models.AssignApiRequest) errUtility.CustomError
 	GetAssignedEndpointsFunc func(ctx context.Context, menuID uuid.UUID) ([]models.MenuApiResponse, errUtility.CustomError)
 	GetByIDFunc              func(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError)
@@ -28,18 +30,24 @@ func (m *mockMenuRepo) GetAll(ctx context.Context) ([]models.MenuResponse, errUt
 	return []models.MenuResponse{}, errUtility.CustomError{}
 }
 
-func (m *mockMenuRepo) Create(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError {
-	if m.CreateFunc != nil {
-		return m.CreateFunc(ctx, param)
+func (m *mockMenuRepo) Create(ctx context.Context, param models.CreateMenuRequest) (models.MenuSortOrderInfo, errUtility.CustomError) {
+	if m.CreateWithOrderFunc != nil {
+		return m.CreateWithOrderFunc(ctx, param)
 	}
-	return errUtility.CustomError{}
+	if m.CreateFunc != nil {
+		return models.MenuSortOrderInfo{}, m.CreateFunc(ctx, param)
+	}
+	return models.MenuSortOrderInfo{}, errUtility.CustomError{}
 }
 
-func (m *mockMenuRepo) Update(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError {
-	if m.UpdateFunc != nil {
-		return m.UpdateFunc(ctx, param)
+func (m *mockMenuRepo) Update(ctx context.Context, param models.UpdateMenuRequest) (models.MenuSortOrderInfo, errUtility.CustomError) {
+	if m.UpdateWithOrderFunc != nil {
+		return m.UpdateWithOrderFunc(ctx, param)
 	}
-	return errUtility.CustomError{}
+	if m.UpdateFunc != nil {
+		return models.MenuSortOrderInfo{}, m.UpdateFunc(ctx, param)
+	}
+	return models.MenuSortOrderInfo{}, errUtility.CustomError{}
 }
 
 func (m *mockMenuRepo) AssignApi(ctx context.Context, menuID uuid.UUID, param models.AssignApiRequest) errUtility.CustomError {
@@ -198,6 +206,31 @@ func TestBuildMenuTree(t *testing.T) {
 		}
 	})
 
+	t.Run("should order roots and each sibling group by sort order", func(t *testing.T) {
+		rootFirstID, rootSecondID := "root-first", "root-second"
+		childFirstID, childSecondID := "child-first", "child-second"
+		flatMenus := []models.MenuResponse{
+			{Id: childSecondID, ParentId: &rootFirstID, SortOrder: 2},
+			{Id: rootSecondID, SortOrder: 2},
+			{Id: childFirstID, ParentId: &rootFirstID, SortOrder: 1},
+			{Id: rootFirstID, SortOrder: 1},
+		}
+
+		tree := buildMenuTree(flatMenus)
+		if len(tree) != 2 {
+			t.Fatalf("expected 2 root menus, got %d", len(tree))
+		}
+		if tree[0].Id != rootFirstID || tree[1].Id != rootSecondID {
+			t.Errorf("expected roots ordered by sort order [%s, %s], got [%s, %s]", rootFirstID, rootSecondID, tree[0].Id, tree[1].Id)
+		}
+		if len(tree[0].Children) != 2 {
+			t.Fatalf("expected 2 children, got %d", len(tree[0].Children))
+		}
+		if tree[0].Children[0].Id != childFirstID || tree[0].Children[1].Id != childSecondID {
+			t.Errorf("expected children ordered by their own sort order [%s, %s], got [%s, %s]", childFirstID, childSecondID, tree[0].Children[0].Id, tree[0].Children[1].Id)
+		}
+	})
+
 	t.Run("should treat node with empty string parentId as root node", func(t *testing.T) {
 		rootID := uuid.New().String()
 		emptyParent := ""
@@ -324,7 +357,7 @@ func TestCreateMenuSrvc(t *testing.T) {
 		}
 
 		srv := menuService{repo: mockRepo}
-		errObj := srv.CreateMenuSrvc(ctx, req)
+		_, errObj := srv.CreateMenuSrvc(ctx, req)
 
 		if errObj.Code != http.StatusInternalServerError {
 			t.Errorf("expected error code %d, got %d", http.StatusInternalServerError, errObj.Code)
@@ -350,7 +383,7 @@ func TestCreateMenuSrvc(t *testing.T) {
 		}
 
 		srv := menuService{repo: mockRepo}
-		errObj := srv.CreateMenuSrvc(ctx, reqWithParent)
+		_, errObj := srv.CreateMenuSrvc(ctx, reqWithParent)
 
 		if errObj.Code != http.StatusBadRequest {
 			t.Errorf("expected error code %d, got %d", http.StatusBadRequest, errObj.Code)
@@ -363,14 +396,14 @@ func TestCreateMenuSrvc(t *testing.T) {
 	t.Run("should generate UUIDv7 and return success when repository succeeds", func(t *testing.T) {
 		var capturedParam models.CreateMenuRequest
 		mockRepo := &mockMenuRepo{
-			CreateFunc: func(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError {
+			CreateWithOrderFunc: func(ctx context.Context, param models.CreateMenuRequest) (models.MenuSortOrderInfo, errUtility.CustomError) {
 				capturedParam = param
-				return errUtility.CustomError{}
+				return models.MenuSortOrderInfo{SortOrder: 2, SuggestedSortOrder: 3}, errUtility.CustomError{}
 			},
 		}
 
 		srv := menuService{repo: mockRepo}
-		errObj := srv.CreateMenuSrvc(ctx, req)
+		orderInfo, errObj := srv.CreateMenuSrvc(ctx, req)
 
 		if errObj.Code != 0 {
 			t.Fatalf("expected error code 0, got %d", errObj.Code)
@@ -383,6 +416,9 @@ func TestCreateMenuSrvc(t *testing.T) {
 		}
 		if capturedParam.Name != req.Name {
 			t.Errorf("expected name %s, got %s", req.Name, capturedParam.Name)
+		}
+		if orderInfo.SortOrder != 2 || orderInfo.SuggestedSortOrder != 3 {
+			t.Errorf("expected sort order info {2, 3}, got %+v", orderInfo)
 		}
 	})
 }
@@ -466,7 +502,7 @@ func TestUpdateMenuSrvc(t *testing.T) {
 		}
 
 		srv := menuService{repo: mockRepo}
-		errObj := srv.UpdateMenuSrvc(ctx, req)
+		_, errObj := srv.UpdateMenuSrvc(ctx, req)
 
 		if errObj.Code != http.StatusInternalServerError {
 			t.Errorf("expected error code %d, got %d", http.StatusInternalServerError, errObj.Code)
@@ -496,7 +532,7 @@ func TestUpdateMenuSrvc(t *testing.T) {
 		}
 
 		srv := menuService{repo: mockRepo}
-		errObj := srv.UpdateMenuSrvc(ctx, reqWithParent)
+		_, errObj := srv.UpdateMenuSrvc(ctx, reqWithParent)
 
 		if errObj.Code != http.StatusBadRequest {
 			t.Errorf("expected error code %d, got %d", http.StatusBadRequest, errObj.Code)
@@ -520,7 +556,7 @@ func TestUpdateMenuSrvc(t *testing.T) {
 		}
 
 		srv := menuService{repo: mockRepo}
-		errObj := srv.UpdateMenuSrvc(ctx, req)
+		_, errObj := srv.UpdateMenuSrvc(ctx, req)
 
 		if errObj.Code != http.StatusConflict {
 			t.Errorf("expected error code %d, got %d", http.StatusConflict, errObj.Code)
@@ -543,7 +579,7 @@ func TestUpdateMenuSrvc(t *testing.T) {
 		}
 
 		srv := menuService{repo: mockRepo}
-		errObj := srv.UpdateMenuSrvc(ctx, req)
+		_, errObj := srv.UpdateMenuSrvc(ctx, req)
 
 		if errObj.Code != http.StatusNotFound {
 			t.Errorf("expected error code %d, got %d", http.StatusNotFound, errObj.Code)
@@ -559,14 +595,14 @@ func TestUpdateMenuSrvc(t *testing.T) {
 	t.Run("should return success when repository succeeds", func(t *testing.T) {
 		var capturedParam models.UpdateMenuRequest
 		mockRepo := &mockMenuRepo{
-			UpdateFunc: func(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError {
+			UpdateWithOrderFunc: func(ctx context.Context, param models.UpdateMenuRequest) (models.MenuSortOrderInfo, errUtility.CustomError) {
 				capturedParam = param
-				return errUtility.CustomError{}
+				return models.MenuSortOrderInfo{SortOrder: 4, SuggestedSortOrder: 5}, errUtility.CustomError{}
 			},
 		}
 
 		srv := menuService{repo: mockRepo}
-		errObj := srv.UpdateMenuSrvc(ctx, req)
+		orderInfo, errObj := srv.UpdateMenuSrvc(ctx, req)
 
 		if errObj.Code != 0 {
 			t.Fatalf("expected error code 0, got %d", errObj.Code)
@@ -576,6 +612,9 @@ func TestUpdateMenuSrvc(t *testing.T) {
 		}
 		if capturedParam.Name != req.Name {
 			t.Errorf("expected name %s, got %s", req.Name, capturedParam.Name)
+		}
+		if orderInfo.SortOrder != 4 || orderInfo.SuggestedSortOrder != 5 {
+			t.Errorf("expected sort order info {4, 5}, got %+v", orderInfo)
 		}
 	})
 }

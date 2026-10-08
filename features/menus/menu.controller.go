@@ -23,9 +23,9 @@ func init() {
 
 type menuServiceInterface interface {
 	GetAllMenusSrvc(ctx context.Context) ([]*models.MenuResponse, errUtility.CustomError)
-	CreateMenuSrvc(ctx context.Context, param models.CreateMenuRequest) errUtility.CustomError
+	CreateMenuSrvc(ctx context.Context, param models.CreateMenuRequest) (models.MenuSortOrderInfo, errUtility.CustomError)
 	GetByIDSrvc(ctx context.Context, menuID uuid.UUID) (models.MenuResponse, errUtility.CustomError)
-	UpdateMenuSrvc(ctx context.Context, param models.UpdateMenuRequest) errUtility.CustomError
+	UpdateMenuSrvc(ctx context.Context, param models.UpdateMenuRequest) (models.MenuSortOrderInfo, errUtility.CustomError)
 	AssignApiSrvc(ctx context.Context, menuID uuid.UUID, param models.AssignApiRequest) errUtility.CustomError
 	GetAssignedEndpointsSrvc(ctx context.Context, menuID uuid.UUID) ([]models.MenuApiResponse, errUtility.CustomError)
 	DeleteSrvc(ctx context.Context, menuID uuid.UUID) errUtility.CustomError
@@ -252,7 +252,8 @@ func (c menuController) createCtrl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if errObj := c.service.CreateMenuSrvc(r.Context(), reqBody); errObj.Code > 0 {
+	orderInfo, errObj := c.service.CreateMenuSrvc(r.Context(), reqBody)
+	if errObj.Code > 0 {
 		errObj.Compile()
 		statusCode := int(errObj.Code)
 
@@ -263,29 +264,38 @@ func (c menuController) createCtrl(w http.ResponseWriter, r *http.Request) {
 		utilities.Log(reqId, logLevel, path, "menuController.createCtrl", reqBody, "service execution failed", errObj)
 
 		if statusCode == 500 {
-			utilities.WriteJSON(w, statusCode, map[string]interface{}{
+			response := map[string]interface{}{
 				"message": "Failed to create menu",
 				"errors":  "Internal Server Error",
-			})
+			}
+			if orderInfo.SuggestedSortOrder > 0 {
+				response["suggestedSortOrder"] = orderInfo.SuggestedSortOrder
+			}
+			utilities.WriteJSON(w, statusCode, response)
 			return
 		} else {
 			errKey := errObj.Property
 			if errKey == "" {
 				errKey = "error"
 			}
-			utilities.WriteJSON(w, statusCode, map[string]interface{}{
+			response := map[string]interface{}{
 				"message": "Failed to create menu",
 				"errors": map[string]string{
 					errKey: errObj.MessageToSend,
 				},
-			})
+			}
+			if orderInfo.SuggestedSortOrder > 0 {
+				response["suggestedSortOrder"] = orderInfo.SuggestedSortOrder
+			}
+			utilities.WriteJSON(w, statusCode, response)
 			return
 		}
 	}
 
 	utilities.Log(reqId, utilities.DEBUG, path, "menuController.createCtrl", nil, "success", nil)
-	utilities.WriteJSON(w, http.StatusCreated, map[string]string{
+	utilities.WriteJSON(w, http.StatusCreated, map[string]interface{}{
 		"message": "Menu created successfully",
+		"data":    orderInfo,
 	})
 }
 
@@ -315,7 +325,8 @@ func (c menuController) updateCtrl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if errObj := c.service.UpdateMenuSrvc(r.Context(), reqBody); errObj.Code > 0 {
+	orderInfo, errObj := c.service.UpdateMenuSrvc(r.Context(), reqBody)
+	if errObj.Code > 0 {
 		errObj.Compile()
 		statusCode := int(errObj.Code)
 
@@ -326,29 +337,38 @@ func (c menuController) updateCtrl(w http.ResponseWriter, r *http.Request) {
 		utilities.Log(reqId, logLevel, path, "menuController.updateCtrl", reqBody, "service execution failed", errObj)
 
 		if statusCode == 500 {
-			utilities.WriteJSON(w, statusCode, map[string]interface{}{
+			response := map[string]interface{}{
 				"message": "Failed to update menu",
 				"errors":  "Internal Server Error",
-			})
+			}
+			if orderInfo.SuggestedSortOrder > 0 {
+				response["suggestedSortOrder"] = orderInfo.SuggestedSortOrder
+			}
+			utilities.WriteJSON(w, statusCode, response)
 			return
 		} else {
 			errKey := errObj.Property
 			if errKey == "" {
 				errKey = "error"
 			}
-			utilities.WriteJSON(w, statusCode, map[string]interface{}{
+			response := map[string]interface{}{
 				"message": "Failed to update menu",
 				"errors": map[string]string{
 					errKey: errObj.MessageToSend,
 				},
-			})
+			}
+			if orderInfo.SuggestedSortOrder > 0 {
+				response["suggestedSortOrder"] = orderInfo.SuggestedSortOrder
+			}
+			utilities.WriteJSON(w, statusCode, response)
 			return
 		}
 	}
 
 	utilities.Log(reqId, utilities.DEBUG, path, "menuController.updateCtrl", nil, "success", nil)
-	utilities.WriteJSON(w, http.StatusCreated, map[string]string{
+	utilities.WriteJSON(w, http.StatusCreated, map[string]interface{}{
 		"message": "Menu updated successfully",
+		"data":    orderInfo,
 	})
 }
 

@@ -3,6 +3,8 @@ package roles
 import (
 	"context"
 	"net/http"
+	"sort"
+
 	models "schoolify_be/models"
 	errUtility "schoolify_be/utilities/errors"
 
@@ -98,6 +100,7 @@ func buildRoleMenuTree(flatMenus []models.RoleMenuResponse) []*models.RoleMenuRe
 			ParentId:    flatMenus[i].ParentId,
 			Name:        flatMenus[i].Name,
 			Description: flatMenus[i].Description,
+			SortOrder:   flatMenus[i].SortOrder,
 			CreatedAt:   flatMenus[i].CreatedAt,
 			UpdatedAt:   flatMenus[i].UpdatedAt,
 			Status:      flatMenus[i].Status,
@@ -118,7 +121,20 @@ func buildRoleMenuTree(flatMenus []models.RoleMenuResponse) []*models.RoleMenuRe
 			}
 		}
 	}
+	sortRoleMenuTree(rootNodes)
 	return rootNodes
+}
+
+func sortRoleMenuTree(nodes []*models.RoleMenuResponse) {
+	sort.SliceStable(nodes, func(i, j int) bool {
+		if nodes[i].SortOrder == nodes[j].SortOrder {
+			return nodes[i].Id < nodes[j].Id
+		}
+		return nodes[i].SortOrder < nodes[j].SortOrder
+	})
+	for _, node := range nodes {
+		sortRoleMenuTree(node.Children)
+	}
 }
 
 func (s roleService) GetAssignedMenusSrvc(ctx context.Context, roleID uuid.UUID) ([]*models.RoleMenuResponse, errUtility.CustomError) {
